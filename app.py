@@ -127,7 +127,7 @@ if uploaded_file is not None:
                         total = meta['total_frames']
                         pct = int((current / total) * 50) # First 50% of progress bar
                         progress_bar.progress(pct)
-                        frame_placeholder.image(meta['frame'], channels="RGB", use_column_width=True, caption=f"Frame {current}")
+                        frame_placeholder.image(meta['frame'], channels="RGB", caption=f"Frame {current}")
 
                     # --- STEP 2: AI ANALYSIS ---
                     status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
