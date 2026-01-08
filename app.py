@@ -95,51 +95,76 @@ if uploaded_file is not None:
             analyze_btn = st.button("✨ Analyze Physics", type="primary", use_container_width=True)
             
             if analyze_btn:
-                # Setup UI Containers for real-time feedback
+                # --- CHECK API KEY ---
+                # We check secrets first, or allow user to input manually (good for demos)
+                api_key = st.secrets.get("GOOGLE_API_KEY")
+                if not api_key:
+                    st.error("❌ Google API Key is missing. Please set it in .streamlit/secrets.toml")
+                    st.stop()
+                
+                # Configure AI
+                from ai_utils import configure_gemini, analyze_physics_with_gemini
+                if not configure_gemini(api_key):
+                    st.stop()
+
+                # --- STEP 1: FRAME EXTRACTION ---
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                frame_placeholder = st.empty() # Placeholder for the video preview
+                frame_placeholder = st.empty()
                 
                 try:
                     # Initialize Generator
-                    # Stride=5: Process every 5th frame for speed
-                    # Resize=400: Smaller images for faster UI rendering
                     generator = get_video_frames_generator(tfile_path, stride=5, resize_width=400)
                     
                     processed_frames = []
-                    status_text.markdown("**🔄 Processing Video Frames...**")
+                    status_text.markdown("**1/2 🔄 Processing Video Frames...**")
                     
-                    # Real-time Processing Loop
                     for meta in generator:
-                        frame_rgb = meta['frame']
-                        current_frame = meta['frame_id']
-                        total = meta['total_frames']
-                        
-                        # Update Progress Bar
-                        percentage = int((current_frame / total) * 100) if total > 0 else 0
-                        progress_bar.progress(min(percentage, 100))
-                        
-                        # Display "Live" Preview
-                        frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True, caption=f"Frame {current_frame}")
-                        
-                        # Store metadata (we will send this to Gemini later)
                         processed_frames.append(meta)
                         
-                    # Finalize UI
-                    progress_bar.progress(100)
-                    status_text.success(f"✅ Extracted {len(processed_frames)} Keyframes for Analysis")
+                        # Update UI
+                        current = meta['frame_id']
+                        total = meta['total_frames']
+                        pct = int((current / total) * 50) # First 50% of progress bar
+                        progress_bar.progress(pct)
+                        frame_placeholder.image(meta['frame'], channels="RGB", use_column_width=True, caption=f"Frame {current}")
+
+                    # --- STEP 2: AI ANALYSIS ---
+                    status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
+                    progress_bar.progress(75)
                     
-                    # Show Result Summary
-                    with st.expander("📊 Analysis Data", expanded=True):
-                        st.write(f"**Total Frames Scanned:** {len(processed_frames)}")
-                        if processed_frames:
-                            st.write(f"**Video Duration:** {processed_frames[-1]['timestamp']:.2f}s")
-                        st.info("Ready to send frames to Gemini 3 API in Phase 4.")
+                    # Call our new AI module
+                    ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
+                    
+                    progress_bar.progress(100)
+                    status_text.success("✅ Analysis Complete!")
+                    
+                    # --- DISPLAY RESULTS ---
+                    st.divider()
+                    
+                    # Handle Errors gracefully
+                    if "error" in ai_result:
+                        st.error("AI Analysis Failed")
+                        st.json(ai_result)
+                    else:
+                        # Pretty Display of Physics Data
+                        r_col1, r_col2 = st.columns([1, 2])
+                        
+                        with r_col1:
+                            st.metric("Detected Object", ai_result.get("main_object", "Unknown"))
+                            st.metric("Est. Velocity", ai_result.get("velocity_estimation", "N/A"))
+                            st.metric("Principle", ai_result.get("physics_principle", "N/A"))
+                        
+                        with r_col2:
+                            st.info(f"**AI Explanation ({analysis_mode}):**\n\n{ai_result.get('explanation', 'No explanation provided.')}")
+                        
+                        # Show raw JSON for debugging (Collapsed)
+                        with st.expander("🛠️ View Raw Gemini Response (JSON)"):
+                            st.json(ai_result)
 
                 except Exception as e:
-                    st.error(f"Analysis Failed: {e}")
+                    st.error(f"An error occurred: {e}")
                 
                 finally:
-                    # Clean up the temp file to save disk space
                     if os.path.exists(tfile_path):
                         os.remove(tfile_path)
