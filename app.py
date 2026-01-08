@@ -1,7 +1,8 @@
 import streamlit as st
 import tempfile
 import os
-import time
+import cv2  # Required for image display logic
+from video_utils import get_video_frames_generator  # Import our new module
 
 # --- APP CONFIGURATION ---
 st.set_page_config(
@@ -11,8 +12,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CUSTOM CSS (PRO POLISH) ---
-# A little CSS to make the drag-and-drop area pop and clean up the UI
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
     .stApp {
@@ -42,8 +42,7 @@ st.markdown("""
 # --- UTILITY FUNCTIONS ---
 def save_uploaded_file(uploaded_file):
     """
-    Expert Tip: OpenCV needs a file path, not a BytesIO object. 
-    We save the upload to a temp file to bridge Streamlit and OpenCV.
+    Saves the uploaded file to a temporary location so OpenCV can read it.
     """
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
@@ -78,11 +77,10 @@ st.markdown('<div class="sub-text">Upload a video to analyze motion, forces, and
 uploaded_file = st.file_uploader("Drop your physics video here", type=['mp4', 'mov', 'avi'])
 
 if uploaded_file is not None:
-    # 1. Save file locally so OpenCV can read it later
+    # 1. Save file locally so OpenCV can read it
     tfile_path = save_uploaded_file(uploaded_file)
     
     if tfile_path:
-        # Layout: Split screen (Input vs Output placeholder)
         col1, col2 = st.columns(2)
         
         with col1:
@@ -93,44 +91,55 @@ if uploaded_file is not None:
         with col2:
             st.subheader("AI Analysis")
             
-            # This is where your state management shines.
-            # Only run analysis when clicked, not on every re-render.
+            # State Management: Only run analysis when clicked
             analyze_btn = st.button("✨ Analyze Physics", type="primary", use_container_width=True)
             
             if analyze_btn:
+                # Setup UI Containers for real-time feedback
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                frame_placeholder = st.empty() # Placeholder for the video preview
                 
-                # Mocking the processing pipeline for the demo
-                status_text.text("Extracting keyframes with OpenCV...")
-                time.sleep(1) 
-                progress_bar.progress(33)
-                
-                status_text.text("Sending telemetry to Gemini 3...")
-                time.sleep(1)
-                progress_bar.progress(66)
-                
-                status_text.text("Rendering overlays...")
-                time.sleep(1)
-                progress_bar.progress(100)
-                
-                # Success State
-                st.success("Analysis Complete!")
-                
-                # Placeholder for the Output Video
-                # In the next step, we will replace this with the actual OpenCV output
-                st.info("Overlay generation logic will be injected here.")
-                
-                # Mock result data
-                with st.expander("📝 Generated Physics Report (Gemini 3)", expanded=True):
-                    st.markdown(f"""
-                    **detected_object**: Projectile
-                    **estimated_velocity**: 14.5 m/s
-                    **principle**: Newtonian Mechanics (Parabolic Trajectory)
+                try:
+                    # Initialize Generator
+                    # Stride=5: Process every 5th frame for speed
+                    # Resize=400: Smaller images for faster UI rendering
+                    generator = get_video_frames_generator(tfile_path, stride=5, resize_width=400)
                     
-                    **Explanation ({analysis_mode}):**
-                    The object follows a curved path due to gravity acting downwards while it maintains constant horizontal velocity.
-                    """)
+                    processed_frames = []
+                    status_text.markdown("**🔄 Processing Video Frames...**")
                     
-    # Cleanup: Good hygiene to remove temp file after session (optional, depending on persistence needs)
-    # os.remove(tfile_path)
+                    # Real-time Processing Loop
+                    for meta in generator:
+                        frame_rgb = meta['frame']
+                        current_frame = meta['frame_id']
+                        total = meta['total_frames']
+                        
+                        # Update Progress Bar
+                        percentage = int((current_frame / total) * 100) if total > 0 else 0
+                        progress_bar.progress(min(percentage, 100))
+                        
+                        # Display "Live" Preview
+                        frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True, caption=f"Frame {current_frame}")
+                        
+                        # Store metadata (we will send this to Gemini later)
+                        processed_frames.append(meta)
+                        
+                    # Finalize UI
+                    progress_bar.progress(100)
+                    status_text.success(f"✅ Extracted {len(processed_frames)} Keyframes for Analysis")
+                    
+                    # Show Result Summary
+                    with st.expander("📊 Analysis Data", expanded=True):
+                        st.write(f"**Total Frames Scanned:** {len(processed_frames)}")
+                        if processed_frames:
+                            st.write(f"**Video Duration:** {processed_frames[-1]['timestamp']:.2f}s")
+                        st.info("Ready to send frames to Gemini 3 API in Phase 4.")
+
+                except Exception as e:
+                    st.error(f"Analysis Failed: {e}")
+                
+                finally:
+                    # Clean up the temp file to save disk space
+                    if os.path.exists(tfile_path):
+                        os.remove(tfile_path)
