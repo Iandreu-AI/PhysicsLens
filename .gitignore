@@ -1,4 +1,4 @@
-secrets/
+.streamlit/
 __pycache__/
 *.pyc
 
