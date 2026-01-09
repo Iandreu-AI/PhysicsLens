@@ -3,6 +3,8 @@ import tempfile
 import os
 import cv2  # Required for image display logic
 from video_utils import get_video_frames_generator  # Import our new module
+from overlay_utils import PhysicsOverlay  # Import our overlay module
+import numpy as np
 
 # --- APP CONFIGURATION ---
 st.set_page_config(
@@ -114,26 +116,78 @@ if uploaded_file is not None:
                 
                 try:
                     # Initialize Generator
-                    generator = get_video_frames_generator(tfile_path, stride=5, resize_width=400)
+                    # Note: We resize to 600 for better visibility of vectors
+                    generator = get_video_frames_generator(tfile_path, stride=5, resize_width=600)
                     
                     processed_frames = []
-                    status_text.markdown("**1/2 🔄 Processing Video Frames...**")
+                    status_text.markdown("**1/2 🔄 Processing Video Frames & Trajectories...**")
+                    
+                    # Simulation variables for the demo effect
+                    sim_x = 100
+                    sim_y = 100
                     
                     for meta in generator:
+                        # 1. Keep the clean frame for AI analysis
+                        clean_frame = meta['frame']
                         processed_frames.append(meta)
                         
-                        # Update UI
+                        # 2. Create a copy for visualization (So we don't confuse the AI later)
+                        vis_frame = clean_frame.copy()
+                        
+                        # 3. APPLY OVERLAYS (Demo Mode)
+                        if show_vectors:
+                            # Calculate center of frame
+                            h, w = vis_frame.shape[:2]
+                            center_x, center_y = w // 2, h // 2
+                            
+                            # SIMULATION: Draw a Gravity Vector (Always down)
+                            PhysicsOverlay.draw_vector(
+                                vis_frame,
+                                start_point=(center_x, center_y),
+                                vector=(0, 50), # 50px down
+                                label="Mg (Gravity)",
+                                color=PhysicsOverlay.COLOR_FORCE,
+                                scale=1.0
+                            )
+                            
+                            # SIMULATION: Draw a Dynamic Velocity Vector
+                            # Uses frame_id to rotate the vector to show it's "alive"
+                            t = meta['frame_id'] * 0.1
+                            vel_x = 40 * np.cos(t)
+                            vel_y = 40 * np.sin(t)
+                            
+                            PhysicsOverlay.draw_vector(
+                                vis_frame,
+                                start_point=(center_x, center_y),
+                                vector=(vel_x, vel_y),
+                                label="Velocity",
+                                color=PhysicsOverlay.COLOR_VELOCITY,
+                                scale=1.5
+                            )
+                            
+                            # Add HUD
+                            PhysicsOverlay.draw_hud(vis_frame, {
+                                "Frame": meta['frame_id'],
+                                "Time": f"{meta['timestamp']:.2f}s",
+                                "Est. Speed": f"{abs(vel_x*2):.1f} m/s"
+                            })
+
+                        # 4. Update UI with the VISUALIZED frame
                         current = meta['frame_id']
                         total = meta['total_frames']
-                        pct = int((current / total) * 50) # First 50% of progress bar
+                        pct = min(int((current / total) * 50), 100)
                         progress_bar.progress(pct)
-                        frame_placeholder.image(meta['frame'], channels="RGB", caption=f"Frame {current}")
-
-                    # --- STEP 2: AI ANALYSIS ---
+                        
+                        # Streamlit displays the frame with vectors
+                        frame_placeholder.image(vis_frame, channels="RGB", caption=f"Processing Frame {current}")
+                        
+                    
+                 # --- STEP 2: AI ANALYSIS ---
                     status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
                     progress_bar.progress(75)
                     
-                    # Call our new AI module
+                    # Call the AI module
+                    # Ensure ai_utils.py exists in your folder!
                     ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
                     
                     progress_bar.progress(100)
@@ -164,7 +218,11 @@ if uploaded_file is not None:
 
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
+                    # Optional: Print traceback for debugging
+                    # import traceback
+                    # st.text(traceback.format_exc())
                 
                 finally:
+                    # Clean up the temp file
                     if os.path.exists(tfile_path):
                         os.remove(tfile_path)
