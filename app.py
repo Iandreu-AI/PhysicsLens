@@ -230,7 +230,48 @@ if uploaded_file is not None:
                             st.warning("Could not generate coordinate overlay.")
                     
                     # Call the AI module
-                    ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
+                     ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
+                    
+                    progress_bar.progress(100)
+                    status_text.success("✅ Analysis Complete!")
+                    
+                    # --- DISPLAY RESULTS ---
+                    st.divider()
+                    
+                    # --- BUG FIX START ---
+                    # Check if result is None BEFORE checking for "error" key
+                    if ai_result is None:
+                        st.error("🚨 AI Error: The model returned no response.")
+                        st.warning(" Troubleshooting:")
+                        st.markdown("""
+                        1. Check your **Internet Connection**.
+                        2. Verify `GOOGLE_API_KEY` in `.streamlit/secrets.toml`.
+                        3. You might have hit the **Free Tier Quota** (Wait 60s and try again).
+                        """)
+                    
+                    elif "error" in ai_result:
+                        st.error("AI Analysis Failed with message:")
+                        st.json(ai_result)
+                        
+                    else:
+                        # Pretty Display of Physics Data
+                        r_col1, r_col2 = st.columns([1, 2])
+                        
+                        with r_col1:
+                            st.metric("Detected Object", ai_result.get("main_object", "Unknown"))
+                            st.metric("Est. Velocity", ai_result.get("velocity_estimation", "N/A"))
+                            st.metric("Principle", ai_result.get("physics_principle", "N/A"))
+                        
+                        with r_col2:
+                            st.info(f"**AI Explanation ({analysis_mode}):**\n\n{ai_result.get('explanation', 'No explanation provided.')}")
+                        
+                        # Show raw JSON for debugging (Collapsed)
+                        with st.expander("🛠️ View Raw Gemini Response (JSON)"):
+                            st.json(ai_result)
+                    # --- BUG FIX END ---
+
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
                     
                     progress_bar.progress(100)
                     status_text.success("✅ Analysis Complete!")
