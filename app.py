@@ -1,4 +1,4 @@
-imimport streamlit as st
+import streamlit as st
 import tempfile
 import os
 import cv2
