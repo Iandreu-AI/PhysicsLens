@@ -1,11 +1,18 @@
-import streamlit as st
+imimport streamlit as st
 import tempfile
 import os
-import cv2  # Required for image display logic
-from video_utils import get_video_frames_generator  # Import our new module
-from overlay_utils import PhysicsOverlay  # Import our overlay module
+import cv2
 import numpy as np
-from track_utils import MotionTracker  # Import motion tracking module
+
+# --- LOCAL MODULE IMPORTS ---
+# Ensure you have these files in the same directory:
+# 1. video_utils.py
+# 2. overlay_utils.py
+# 3. track_utils.py
+# 4. ai_utils.py
+from video_utils import get_video_frames_generator
+from overlay_utils import PhysicsOverlay
+from track_utils import MotionTracker 
 
 # --- APP CONFIGURATION ---
 st.set_page_config(
@@ -67,7 +74,6 @@ with st.sidebar:
     )
     
     show_vectors = st.checkbox("Show Force Vectors", value=True)
-    show_trajectories = st.checkbox("Show Trajectories", value=True)
     
     st.divider()
     st.info(f"Powered by **Gemini 3** & **OpenCV**")
@@ -99,62 +105,53 @@ if uploaded_file is not None:
             
             if analyze_btn:
                 # --- CHECK API KEY ---
-                # We check secrets first, or allow user to input manually (good for demos)
                 api_key = st.secrets.get("GOOGLE_API_KEY")
                 if not api_key:
                     st.error("❌ Google API Key is missing. Please set it in .streamlit/secrets.toml")
                     st.stop()
                 
-                # Configure AI
-                from ai_utils import configure_gemini, analyze_physics_with_gemini
-                if not configure_gemini(api_key):
+                # Configure AI (Import locally to avoid startup errors if keys are missing)
+                try:
+                    from ai_utils import configure_gemini, analyze_physics_with_gemini
+                    if not configure_gemini(api_key):
+                        st.stop()
+                except ImportError:
+                    st.error("❌ ai_utils.py is missing!")
                     st.stop()
 
-                # --- STEP 1: FRAME EXTRACTION ---
+                # --- STEP 1: FRAME EXTRACTION & TRACKING ---
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 frame_placeholder = st.empty()
                 
+                processed_frames = []
+                
                 try:
-                    # Initialize Generator
-                    # Note: We resize to 600 for better visibility of vectors
-                    generator = get_video_frames_generator(tfile_path, stride=5, resize_width=600)
-                    
-                    processed_frames = []
-                    status_text.markdown("**1/2 🔄 Processing Video Frames & Trajectories...**")
-                    
-                    # Simulation variables for the demo effect
-                    sim_x = 100
-                    sim_y = 100
-                    
-                    for meta in generator:
-                        try:
-                            # Initialize Generator
+                    # 1. Initialize Generator (Resize for performance)
                     generator = get_video_frames_generator(tfile_path, stride=2, resize_width=600)
                     
-                    # --- INITIALIZE TRACKER ---
+                    # 2. Initialize Tracker (ONCE, before loop)
                     tracker = MotionTracker()
                     
-                    processed_frames = []
                     status_text.markdown("**1/2 🔄 Tracking Physics Object...**")
                     
+                    # --- MAIN PROCESSING LOOP ---
                     for meta in generator:
                         clean_frame = meta['frame']
                         processed_frames.append(meta)
                         
-                        # Copy for visualization
+                        # Create a copy for visualization so we don't draw on the AI's data
                         vis_frame = clean_frame.copy()
                         
                         # --- REAL CV TRACKING ---
-                        # Get real position and velocity from the video
                         center, velocity = tracker.process_frame(vis_frame)
                         
                         if show_vectors:
-                            # If no object detected yet, default to center of screen
+                            # Center Calculation
                             h, w = vis_frame.shape[:2]
                             display_center = center if center else (w//2, h//2)
                             
-                            # 1. Draw Gravity (Static)
+                            # A. Draw Gravity (Static Downward Force)
                             PhysicsOverlay.draw_vector(
                                 vis_frame,
                                 start_point=display_center,
@@ -163,9 +160,9 @@ if uploaded_file is not None:
                                 color=PhysicsOverlay.COLOR_FORCE
                             )
                             
-                            # 2. Draw Real-Time Velocity (Dynamic)
-                            # Only draw if moving fast enough to matter
+                            # B. Draw Real-Time Velocity
                             vx, vy = velocity
+                            # Threshold to remove noise (only draw if moving)
                             if abs(vx) > 1 or abs(vy) > 1:
                                 PhysicsOverlay.draw_vector(
                                     vis_frame,
@@ -173,10 +170,10 @@ if uploaded_file is not None:
                                     vector=(vx, vy),
                                     label=f"v={np.sqrt(vx**2+vy**2):.1f}",
                                     color=PhysicsOverlay.COLOR_VELOCITY,
-                                    scale=5.0  # Boost scale since pixel-to-pixel movement is small
+                                    scale=5.0 # Scale up for visibility
                                 )
 
-                            # 3. Draw HUD
+                            # C. Draw HUD
                             PhysicsOverlay.draw_hud(vis_frame, {
                                 "Frame": meta['frame_id'],
                                 "Status": "Tracking" if center else "Scanning...",
@@ -190,14 +187,12 @@ if uploaded_file is not None:
                         pct = min(int((current / total) * 50), 100)
                         progress_bar.progress(pct)
                         frame_placeholder.image(vis_frame, channels="RGB", caption=f"Analyzing Frame {current}")
-
                     
-                 # --- STEP 2: AI ANALYSIS ---
+                    # --- STEP 2: AI ANALYSIS ---
                     status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
                     progress_bar.progress(75)
                     
                     # Call the AI module
-                    # Ensure ai_utils.py exists in your folder!
                     ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
                     
                     progress_bar.progress(100)
@@ -228,7 +223,7 @@ if uploaded_file is not None:
 
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
-                    # Optional: Print traceback for debugging
+                    # Uncomment for deep debugging:
                     # import traceback
                     # st.text(traceback.format_exc())
                 
