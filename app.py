@@ -230,7 +230,7 @@ if uploaded_file is not None:
                             st.warning("Could not generate coordinate overlay.")
                     
                     # Call the AI module
-                     ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
+                    ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
                     
                     progress_bar.progress(100)
                     status_text.success("✅ Analysis Complete!")
