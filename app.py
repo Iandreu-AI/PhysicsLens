@@ -5,6 +5,7 @@ import cv2  # Required for image display logic
 from video_utils import get_video_frames_generator  # Import our new module
 from overlay_utils import PhysicsOverlay  # Import our overlay module
 import numpy as np
+from track_utils import MotionTracker  # Import motion tracking module
 
 # --- APP CONFIGURATION ---
 st.set_page_config(
@@ -127,60 +128,69 @@ if uploaded_file is not None:
                     sim_y = 100
                     
                     for meta in generator:
-                        # 1. Keep the clean frame for AI analysis
+                        try:
+                            # Initialize Generator
+                    generator = get_video_frames_generator(tfile_path, stride=2, resize_width=600)
+                    
+                    # --- INITIALIZE TRACKER ---
+                    tracker = MotionTracker()
+                    
+                    processed_frames = []
+                    status_text.markdown("**1/2 🔄 Tracking Physics Object...**")
+                    
+                    for meta in generator:
                         clean_frame = meta['frame']
                         processed_frames.append(meta)
                         
-                        # 2. Create a copy for visualization (So we don't confuse the AI later)
+                        # Copy for visualization
                         vis_frame = clean_frame.copy()
                         
-                        # 3. APPLY OVERLAYS (Demo Mode)
+                        # --- REAL CV TRACKING ---
+                        # Get real position and velocity from the video
+                        center, velocity = tracker.process_frame(vis_frame)
+                        
                         if show_vectors:
-                            # Calculate center of frame
+                            # If no object detected yet, default to center of screen
                             h, w = vis_frame.shape[:2]
-                            center_x, center_y = w // 2, h // 2
+                            display_center = center if center else (w//2, h//2)
                             
-                            # SIMULATION: Draw a Gravity Vector (Always down)
+                            # 1. Draw Gravity (Static)
                             PhysicsOverlay.draw_vector(
                                 vis_frame,
-                                start_point=(center_x, center_y),
-                                vector=(0, 50), # 50px down
-                                label="Mg (Gravity)",
-                                color=PhysicsOverlay.COLOR_FORCE,
-                                scale=1.0
+                                start_point=display_center,
+                                vector=(0, 40), 
+                                label="Mg", 
+                                color=PhysicsOverlay.COLOR_FORCE
                             )
                             
-                            # SIMULATION: Draw a Dynamic Velocity Vector
-                            # Uses frame_id to rotate the vector to show it's "alive"
-                            t = meta['frame_id'] * 0.1
-                            vel_x = 40 * np.cos(t)
-                            vel_y = 40 * np.sin(t)
-                            
-                            PhysicsOverlay.draw_vector(
-                                vis_frame,
-                                start_point=(center_x, center_y),
-                                vector=(vel_x, vel_y),
-                                label="Velocity",
-                                color=PhysicsOverlay.COLOR_VELOCITY,
-                                scale=1.5
-                            )
-                            
-                            # Add HUD
+                            # 2. Draw Real-Time Velocity (Dynamic)
+                            # Only draw if moving fast enough to matter
+                            vx, vy = velocity
+                            if abs(vx) > 1 or abs(vy) > 1:
+                                PhysicsOverlay.draw_vector(
+                                    vis_frame,
+                                    start_point=display_center,
+                                    vector=(vx, vy),
+                                    label=f"v={np.sqrt(vx**2+vy**2):.1f}",
+                                    color=PhysicsOverlay.COLOR_VELOCITY,
+                                    scale=5.0  # Boost scale since pixel-to-pixel movement is small
+                                )
+
+                            # 3. Draw HUD
                             PhysicsOverlay.draw_hud(vis_frame, {
                                 "Frame": meta['frame_id'],
-                                "Time": f"{meta['timestamp']:.2f}s",
-                                "Est. Speed": f"{abs(vel_x*2):.1f} m/s"
+                                "Status": "Tracking" if center else "Scanning...",
+                                "Velocity X": f"{vx:.2f}",
+                                "Velocity Y": f"{vy:.2f}"
                             })
 
-                        # 4. Update UI with the VISUALIZED frame
+                        # Update UI
                         current = meta['frame_id']
                         total = meta['total_frames']
                         pct = min(int((current / total) * 50), 100)
                         progress_bar.progress(pct)
-                        
-                        # Streamlit displays the frame with vectors
-                        frame_placeholder.image(vis_frame, channels="RGB", caption=f"Processing Frame {current}")
-                        
+                        frame_placeholder.image(vis_frame, channels="RGB", caption=f"Analyzing Frame {current}")
+
                     
                  # --- STEP 2: AI ANALYSIS ---
                     status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
