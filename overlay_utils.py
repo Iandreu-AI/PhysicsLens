@@ -90,12 +90,44 @@ class PhysicsOverlay:
         cv2.putText(frame, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
     @staticmethod
-    def draw_hud(frame, data_dict):
-        """Draws a Heads-Up Display with physics stats."""
-        y_offset = 30
-        for key, value in data_dict.items():
-            text = f"{key}: {value}"
-            cv2.putText(frame, text, (10, y_offset), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
-            y_offset += 25
+    def draw_ai_overlay(frame, ai_data):
+        """
+        Draws vectors based on normalized Gemini JSON data.
+        """
+        if not ai_data:
+            return frame
+            
+        h, w = frame.shape[:2]
+        
+        # Helper to convert normalized (0.0-1.0) to pixel (0-W)
+        def to_pix(coord):
+            return (int(coord[0] * w), int(coord[1] * h))
+        
+        # Draw Center of Mass
+        if "object_center" in ai_data:
+            center = to_pix(ai_data["object_center"])
+            cv2.circle(frame, center, 6, (255, 255, 255), -1)
+            cv2.circle(frame, center, 8, (0, 0, 0), 2)
+            
+        # Draw Vectors
+        if "vectors" in ai_data:
+            for vec in ai_data["vectors"]:
+                start = to_pix(vec["start"])
+                end = to_pix(vec["end"])
+                
+                # Parse Color name to BGR
+                c_map = {
+                    "red": (0, 0, 255),
+                    "green": (0, 255, 0),
+                    "blue": (255, 0, 0),
+                    "yellow": (0, 255, 255)
+                }
+                color = c_map.get(vec.get("color", "green"), (0, 255, 0))
+                
+                # Draw using our existing robust method, but calculating delta manually
+                cv2.arrowedLine(frame, start, end, color, 4, cv2.LINE_AA, tipLength=0.2)
+                
+                # Label
+                PhysicsOverlay._draw_label(frame, end, vec["name"], color)
+                
         return frame
