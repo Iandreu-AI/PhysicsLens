@@ -191,6 +191,43 @@ if uploaded_file is not None:
                     # --- STEP 2: AI ANALYSIS ---
                     status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
                     progress_bar.progress(75)
+
+                    # --- STEP 3: VISUAL FREE BODY DIAGRAM (The "Wow" Factor) ---
+                    st.divider()
+                    st.subheader("🤖 AI-Generated Free Body Diagram")
+                    st.markdown("Gemini is now calculating exact vector coordinates for a keyframe...")
+                    
+                    # 1. Pick a "Key Frame" (e.g., middle of the video)
+                    # We saved processed_frames list earlier
+                    if len(processed_frames) > 0:
+                        mid_index = len(processed_frames) // 2
+                        key_frame_meta = processed_frames[mid_index]
+                        key_frame_bgr = key_frame_meta['original_frame_bgr'] # Use original for best AI clarity
+                        
+                        # 2. Call the new AI function
+                        # Make sure to import it at top: from ai_utils import get_physics_overlay_coordinates
+                        from ai_utils import get_physics_overlay_coordinates
+                        
+                        ai_coords = get_physics_overlay_coordinates(key_frame_bgr)
+                        
+                        if ai_coords:
+                            # 3. Draw on the frame using the AI's coordinates
+                            fbd_frame = key_frame_bgr.copy()
+                            fbd_frame = PhysicsOverlay.draw_ai_overlay(fbd_frame, ai_coords)
+                            
+                            # 4. Display Side-by-Side
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.image(key_frame_meta['frame'], caption="Raw Frame", use_container_width=True)
+                            with c2:
+                                # Convert BGR to RGB for Streamlit
+                                fbd_rgb = cv2.cvtColor(fbd_frame, cv2.COLOR_BGR2RGB)
+                                st.image(fbd_rgb, caption="Gemini-Guided Vector Overlay", use_container_width=True)
+                                
+                            with st.expander("See Coordinate Data"):
+                                st.json(ai_coords)
+                        else:
+                            st.warning("Could not generate coordinate overlay.")
                     
                     # Call the AI module
                     ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
