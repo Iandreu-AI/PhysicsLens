@@ -370,7 +370,7 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
     Analyzes the video frames to produce the text explanation.
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash') # Flash is faster for text
+        model = genai.GenerativeModel('gemini-3-pro-preview') # Flash is faster for text
         
         # We take the middle frame as the reference image
         if not frames_data:
