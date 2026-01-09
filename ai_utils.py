@@ -10,9 +10,14 @@ def configure_gemini(api_key):
     return True
 
 # 2. The Text Analysis Function (Keep this from before if you have it)
-def analyze_physics_with_gemini(frames_list, analysis_level="High School Physics"):
-    # ... your existing logic for text explanation ...
-    pass 
+def analyze_physics_with_gemini(frames, analysis_level):
+    try:
+        # ... API calling logic ...
+        return json_data
+    except Exception as e:
+        print(f"Error: {e}")
+        # RETURN A DICT, NOT NONE
+        return {"error": str(e), "explanation": "AI failed to process video."}
 
 # 3. The New Coordinate Function (Add this)
 def get_physics_overlay_coordinates(frame_bgr):
