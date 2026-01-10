@@ -3,18 +3,14 @@ import tempfile
 import os
 import cv2
 import numpy as np
+import time
 
 # --- LOCAL MODULE IMPORTS ---
-# Ensure you have these files in the same directory:
-# 1. video_utils.py
-# 2. overlay_utils.py
-# 3. track_utils.py
-# 4. ai_utils.py
 from video_utils import get_video_frames_generator
 from overlay_utils import PhysicsOverlay
 from track_utils import MotionTracker 
 
-# --- APP CONFIGURATION ---
+# --- CONFIGURATION & CUSTOM CSS ---
 st.set_page_config(
     page_title="PhysicsLens AI",
     page_icon="🔭",
@@ -22,38 +18,63 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #0e1117;
-    }
+    /* Global Theme */
+    .stApp { background-color: #0e1117; }
+    
+    /* Headers */
+    h1, h2, h3 { color: #f0f2f6; font-family: 'Inter', sans-serif; }
     .main-header {
-        font-size: 2.5rem;
-        color: #4facfe;
+        font-size: 3rem;
+        background: -webkit-linear-gradient(45deg, #4facfe, #00f2fe);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800;
         text-align: center;
-        font-weight: 700;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
     }
-    .sub-text {
-        text-align: center;
-        color: #b0b0b0;
-        margin-bottom: 2rem;
-    }
-    /* Highlight the uploader */
-    div[data-testid="stFileUploader"] {
-        border: 2px dashed #4facfe;
+    .sub-text { text-align: center; color: #a0a0a0; margin-bottom: 2rem; }
+    
+    /* Metrics Styling */
+    div[data-testid="stMetricValue"] { font-size: 1.5rem; color: #4facfe; }
+    
+    /* Gallery Card Styling */
+    .gallery-card {
+        border: 1px solid #303030;
         border-radius: 10px;
-        padding: 20px;
+        padding: 10px;
+        background-color: #161b22;
+        margin-bottom: 15px;
+        text-align: center;
     }
+    .caption-text { color: #b0b0b0; font-size: 0.85rem; margin-top: 8px; font-style: italic; }
+    
+    /* Hide Default Elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- UTILITY FUNCTIONS ---
+# --- STATE MANAGEMENT ---
+if "processing_complete" not in st.session_state:
+    st.session_state.processing_complete = False
+if "analysis_results" not in st.session_state:
+    st.session_state.analysis_results = None
+if "keyframes" not in st.session_state:
+    st.session_state.keyframes = []
+if "current_file_name" not in st.session_state:
+    st.session_state.current_file_name = None
+
+# --- HELPER FUNCTIONS ---
+
+def reset_state():
+    """Resets the session state when a new file is uploaded."""
+    st.session_state.processing_complete = False
+    st.session_state.analysis_results = None
+    st.session_state.keyframes = []
+
 def save_uploaded_file(uploaded_file):
-    """
-    Saves the uploaded file to a temporary location so OpenCV can read it.
-    """
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
             tmp_file.write(uploaded_file.read())
@@ -62,250 +83,197 @@ def save_uploaded_file(uploaded_file):
         st.error(f"Error handling file: {e}")
         return None
 
-# --- SIDEBAR CONFIGURATION ---
-with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/physics.png", width=80)
-    st.title("PhysicsLens Config")
+def extract_and_sample_frames(video_path, num_samples=6):
+    """
+    Extracts frames, runs the CV tracker, and samples 6 evenly spaced keyframes.
+    Returns: List of frame_meta dicts.
+    """
+    generator = get_video_frames_generator(video_path, stride=2, resize_width=600)
+    tracker = MotionTracker()
     
-    st.markdown("### ⚙️ Analysis Settings")
-    analysis_mode = st.selectbox(
-        "Complexity Level",
-        ["ELI5 (Basic)", "High School Physics", "Undergrad (Advanced)", "PhD (Quantum/Relativity)"]
-    )
+    all_frames = []
     
-    show_vectors = st.checkbox("Show Force Vectors", value=True)
-    
-    st.divider()
-    st.info(f"Powered by **Gemini 3** & **OpenCV**")
-
-# --- MAIN LAYOUT ---
-st.markdown('<div class="main-header">🔭 PhysicsLens AI</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-text">Upload a video to analyze motion, forces, and physics principles in real-time.</div>', unsafe_allow_html=True)
-
-# --- FILE UPLOAD SECTION ---
-uploaded_file = st.file_uploader("Drop your physics video here", type=['mp4', 'mov', 'avi'])
-
-if uploaded_file is not None:
-    # 1. Save file locally so OpenCV can read it
-    tfile_path = save_uploaded_file(uploaded_file)
-    
-    if tfile_path:
-        col1, col2 = st.columns(2)
+    # 1. Process entire video for tracking data
+    for meta in generator:
+        clean_frame = meta['frame'].copy()
         
-        with col1:
-            st.subheader("Original Footage")
+        # Run CV Tracking
+        center, velocity = tracker.process_frame(clean_frame)
+        
+        # Enrich metadata
+        meta['center'] = center
+        meta['velocity'] = velocity
+        all_frames.append(meta)
+        
+    # 2. Sample N keyframes evenly
+    total = len(all_frames)
+    if total == 0: return []
+    
+    indices = np.linspace(0, total - 1, num_samples, dtype=int)
+    sampled_frames = [all_frames[i] for i in indices]
+    
+    return sampled_frames, all_frames # Return all frames for Gemini context if needed
+
+# --- UI COMPONENT FUNCTIONS ---
+
+def render_sidebar():
+    with st.sidebar:
+        st.image("https://img.icons8.com/fluency/96/physics.png", width=64)
+        st.markdown("### Analysis Config")
+        
+        mode = st.selectbox(
+            "Complexity Level",
+            ["ELI5 (Basic)", "High School Physics", "Undergrad (Advanced)", "PhD (Quantum/Relativity)"]
+        )
+        
+        st.markdown("---")
+        show_raw = st.toggle("Show Raw Video Player", value=False)
+        
+        st.info("System Ready: Gemini 1.5 + OpenCV")
+        return mode, show_raw
+
+def render_header():
+    st.markdown('<div class="main-header">PhysicsLens AI</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-text">Automated Physics Extraction & Visual Reasoning Engine</div>', unsafe_allow_html=True)
+
+def process_pipeline(tfile_path, api_key, analysis_mode):
+    """
+    The Main Processing Orchestrator.
+    """
+    # Import locally to handle startup errors
+    try:
+        from ai_utils import configure_gemini, analyze_physics_with_gemini, get_physics_overlay_coordinates
+        if not configure_gemini(api_key):
+            st.error("Invalid API Key")
+            st.stop()
+    except ImportError:
+        st.error("Missing ai_utils.py")
+        st.stop()
+
+    with st.status("🚀 Initializing Physics Engine...", expanded=True) as status:
+        
+        # 1. Computer Vision Pass
+        status.write("📷 Extracting keyframes and tracking motion...")
+        sampled_frames, all_frames_context = extract_and_sample_frames(tfile_path)
+        time.sleep(0.5) # UX Pacing
+        
+        # 2. Semantic Analysis (Gemini Flash)
+        status.write("🧠 Generating physics summary...")
+        # We pass a subset of frames to Gemini for the text summary to save bandwidth
+        # Taking every 10th frame from context
+        context_subset = all_frames_context[::10] 
+        ai_text_result = analyze_physics_with_gemini(context_subset, analysis_level=analysis_mode)
+        
+        # 3. Visual Reasoning (Gemini Pro - FBD Generation)
+        status.write("📐 Calculating Free Body Diagrams for keyframes...")
+        final_keyframes = []
+        progress_bar = st.progress(0)
+        
+        for idx, kf in enumerate(sampled_frames):
+            # Call Gemini for coordinates for this specific frame
+            coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
+            
+            # Apply the AI overlay immediately
+            vis_frame = kf['frame'].copy()
+            
+            # Fallback: If AI fails to return coords, use CV tracker data
+            if coords:
+                vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, coords)
+                kf['caption'] = f"AI Detected: {coords.get('vectors', [{}])[0].get('name', 'Object')}"
+            else:
+                # Use CV Fallback
+                center = kf.get('center')
+                vel = kf.get('velocity', (0,0))
+                if center:
+                    vis_frame = PhysicsOverlay.draw_vector(vis_frame, center, vel, "Velocity", PhysicsOverlay.COLOR_VELOCITY, scale=5.0)
+                kf['caption'] = "CV Tracking: Motion Detected"
+            
+            kf['processed_image'] = vis_frame
+            final_keyframes.append(kf)
+            progress_bar.progress((idx + 1) / len(sampled_frames))
+
+        status.update(label="✅ Analysis Complete", state="complete", expanded=False)
+        
+        # Save to session state
+        st.session_state.analysis_results = ai_text_result
+        st.session_state.keyframes = final_keyframes
+        st.session_state.processing_complete = True
+
+def render_results(analysis_mode):
+    result = st.session_state.analysis_results
+    keyframes = st.session_state.keyframes
+    
+    if not result:
+        st.error("No results found. Please re-analyze.")
+        return
+
+    # --- 1. Top Level Metrics ---
+    st.divider()
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Object Detected", result.get("main_object", "Unknown"))
+    m2.metric("Primary Principle", result.get("physics_principle", "Analysis Pending"))
+    m3.metric("Est. Velocity", result.get("velocity_estimation", "Calculating..."))
+    
+    # --- 2. Keyframe Gallery ---
+    st.subheader("🎞️ Physics Timeline")
+    
+    # 2 rows of 3 images
+    rows = [keyframes[:3], keyframes[3:]]
+    
+    for row_frames in rows:
+        cols = st.columns(3)
+        for idx, col in enumerate(cols):
+            if idx < len(row_frames):
+                kf = row_frames[idx]
+                with col:
+                    st.image(kf['processed_image'], use_container_width=True, channels="RGB")
+                    # Dynamic caption based on timestamp
+                    st.markdown(f"<div class='caption-text'>t = {kf['timestamp']:.2f}s | {kf.get('caption', '')}</div>", unsafe_allow_html=True)
+
+    # --- 3. Deep Dive Summary ---
+    st.divider()
+    st.subheader(f"📝 Expert Analysis ({analysis_mode})")
+    
+    if result.get("error"):
+        st.error(f"Analysis Error: {result.get('explanation')}")
+    else:
+        st.info(result.get("explanation"))
+
+# --- MAIN EXECUTION ---
+def main():
+    analysis_mode, show_raw_video = render_sidebar()
+    render_header()
+    
+    uploaded_file = st.file_uploader("Upload footage to begin analysis...", type=['mp4', 'mov', 'avi'])
+    
+    if uploaded_file:
+        # Check if new file to reset state
+        if st.session_state.current_file_name != uploaded_file.name:
+            reset_state()
+            st.session_state.current_file_name = uploaded_file.name
+            
+        tfile_path = save_uploaded_file(uploaded_file)
+        
+        if show_raw_video:
             st.video(uploaded_file)
-            st.caption(f"Filename: {uploaded_file.name}")
-
-        with col2:
-            st.subheader("AI Analysis")
+        
+        # --- API KEY CHECK ---
+        api_key = st.secrets.get("GOOGLE_API_KEY")
+        if not api_key:
+            st.warning("⚠️ Google API Key missing. Add it to .streamlit/secrets.toml to proceed.")
+            st.stop()
             
-            # State Management: Only run analysis when clicked
-            analyze_btn = st.button("✨ Analyze Physics", type="primary", use_container_width=True)
+        # --- AUTO-TRIGGER ANALYSIS ---
+        if not st.session_state.processing_complete:
+            process_pipeline(tfile_path, api_key, analysis_mode)
             
-            if analyze_btn:
-                # --- CHECK API KEY ---
-                api_key = st.secrets.get("GOOGLE_API_KEY")
-                if not api_key:
-                    st.error("❌ Google API Key is missing. Please set it in .streamlit/secrets.toml")
-                    st.stop()
-                
-                # Configure AI (Import locally to avoid startup errors if keys are missing)
-                try:
-                    from ai_utils import configure_gemini, analyze_physics_with_gemini
-                    if not configure_gemini(api_key):
-                        st.stop()
-                except ImportError:
-                    st.error("❌ ai_utils.py is missing!")
-                    st.stop()
+        # --- RENDER DASHBOARD ---
+        if st.session_state.processing_complete:
+            render_results(analysis_mode)
+            
+        # Cleanup
+        if os.path.exists(tfile_path):
+            os.remove(tfile_path)
 
-                # --- STEP 1: FRAME EXTRACTION & TRACKING ---
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                frame_placeholder = st.empty()
-                
-                processed_frames = []
-                
-                try:
-                    # 1. Initialize Generator (Resize for performance)
-                    generator = get_video_frames_generator(tfile_path, stride=2, resize_width=600)
-                    
-                    # 2. Initialize Tracker (ONCE, before loop)
-                    tracker = MotionTracker()
-                    
-                    status_text.markdown("**1/2 🔄 Tracking Physics Object...**")
-                    
-                    # --- MAIN PROCESSING LOOP ---
-                    for meta in generator:
-                        clean_frame = meta['frame']
-                        processed_frames.append(meta)
-                        
-                        # Create a copy for visualization so we don't draw on the AI's data
-                        vis_frame = clean_frame.copy()
-                        
-                        # --- REAL CV TRACKING ---
-                        center, velocity = tracker.process_frame(vis_frame)
-                        
-                        if show_vectors:
-                            # Center Calculation
-                            h, w = vis_frame.shape[:2]
-                            display_center = center if center else (w//2, h//2)
-                            
-                            # A. Draw Gravity (Static Downward Force)
-                            PhysicsOverlay.draw_vector(
-                                vis_frame,
-                                start_point=display_center,
-                                vector=(0, 40), 
-                                label="Mg", 
-                                color=PhysicsOverlay.COLOR_FORCE
-                            )
-                            
-                            # B. Draw Real-Time Velocity
-                            vx, vy = velocity
-                            # Threshold to remove noise (only draw if moving)
-                            if abs(vx) > 1 or abs(vy) > 1:
-                                PhysicsOverlay.draw_vector(
-                                    vis_frame,
-                                    start_point=display_center,
-                                    vector=(vx, vy),
-                                    label=f"v={np.sqrt(vx**2+vy**2):.1f}",
-                                    color=PhysicsOverlay.COLOR_VELOCITY,
-                                    scale=5.0 # Scale up for visibility
-                                )
-
-                            # C. Draw HUD
-                            PhysicsOverlay.draw_hud(vis_frame, {
-                                "Frame": meta['frame_id'],
-                                "Status": "Tracking" if center else "Scanning...",
-                                "Velocity X": f"{vx:.2f}",
-                                "Velocity Y": f"{vy:.2f}"
-                            })
-
-                        # Update UI
-                        current = meta['frame_id']
-                        total = meta['total_frames']
-                        pct = min(int((current / total) * 50), 100)
-                        progress_bar.progress(pct)
-                        frame_placeholder.image(vis_frame, channels="RGB", caption=f"Analyzing Frame {current}")
-                    
-                    # --- STEP 2: AI ANALYSIS ---
-                    status_text.markdown("**2/2 🧠 Gemini is analyzing physics...**")
-                    progress_bar.progress(75)
-
-                    # --- STEP 3: VISUAL FREE BODY DIAGRAM (The "Wow" Factor) ---
-                    st.divider()
-                    st.subheader("🤖 AI-Generated Free Body Diagram")
-                    st.markdown("Gemini is now calculating exact vector coordinates for a keyframe...")
-                    
-                    # 1. Pick a "Key Frame" (e.g., middle of the video)
-                    # We saved processed_frames list earlier
-                    if len(processed_frames) > 0:
-                        mid_index = len(processed_frames) // 2
-                        key_frame_meta = processed_frames[mid_index]
-                        key_frame_bgr = key_frame_meta['original_frame_bgr'] # Use original for best AI clarity
-                        
-                        # 2. Call the new AI function
-                        # Make sure to import it at top: from ai_utils import get_physics_overlay_coordinates
-                        from ai_utils import get_physics_overlay_coordinates
-                        
-                        ai_coords = get_physics_overlay_coordinates(key_frame_bgr)
-                        
-                        if ai_coords:
-                            # 3. Draw on the frame using the AI's coordinates
-                            fbd_frame = key_frame_bgr.copy()
-                            fbd_frame = PhysicsOverlay.draw_ai_overlay(fbd_frame, ai_coords)
-                            
-                            # 4. Display Side-by-Side
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.image(key_frame_meta['frame'], caption="Raw Frame", use_container_width=True)
-                            with c2:
-                                # Convert BGR to RGB for Streamlit
-                                fbd_rgb = cv2.cvtColor(fbd_frame, cv2.COLOR_BGR2RGB)
-                                st.image(fbd_rgb, caption="Gemini-Guided Vector Overlay", use_container_width=True)
-                                
-                            with st.expander("See Coordinate Data"):
-                                st.json(ai_coords)
-                        else:
-                            st.warning("Could not generate coordinate overlay.")
-                    
-                    # Call the AI module
-                    ai_result = analyze_physics_with_gemini(processed_frames, analysis_level=analysis_mode)
-                    
-                    progress_bar.progress(100)
-                    status_text.success("✅ Analysis Complete!")
-                    
-                    # --- DISPLAY RESULTS ---
-                    st.divider()
-                    
-                    # --- BUG FIX START ---
-                    # Check if result is None BEFORE checking for "error" key
-                    if ai_result is None:
-                        st.error("🚨 AI Error: The model returned no response.")
-                        st.warning(" Troubleshooting:")
-                        st.markdown("""
-                        1. Check your **Internet Connection**.
-                        2. Verify `GOOGLE_API_KEY` in `.streamlit/secrets.toml`.
-                        3. You might have hit the **Free Tier Quota** (Wait 60s and try again).
-                        """)
-                    
-                    elif "error" in ai_result:
-                        st.error("AI Analysis Failed with message:")
-                        st.json(ai_result)
-                        
-                    else:
-                        # Pretty Display of Physics Data
-                        r_col1, r_col2 = st.columns([1, 2])
-                        
-                        with r_col1:
-                            st.metric("Detected Object", ai_result.get("main_object", "Unknown"))
-                            st.metric("Est. Velocity", ai_result.get("velocity_estimation", "N/A"))
-                            st.metric("Principle", ai_result.get("physics_principle", "N/A"))
-                        
-                        with r_col2:
-                            st.info(f"**AI Explanation ({analysis_mode}):**\n\n{ai_result.get('explanation', 'No explanation provided.')}")
-                        
-                        # Show raw JSON for debugging (Collapsed)
-                        with st.expander("🛠️ View Raw Gemini Response (JSON)"):
-                            st.json(ai_result)
-                    # --- BUG FIX END ---
-
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
-                    
-                    progress_bar.progress(100)
-                    status_text.success("✅ Analysis Complete!")
-                    
-                    # --- DISPLAY RESULTS ---
-                    st.divider()
-                    
-                    # Handle Errors gracefully
-                    if "error" in ai_result:
-                        st.error("AI Analysis Failed")
-                        st.json(ai_result)
-                    else:
-                        # Pretty Display of Physics Data
-                        r_col1, r_col2 = st.columns([1, 2])
-                        
-                        with r_col1:
-                            st.metric("Detected Object", ai_result.get("main_object", "Unknown"))
-                            st.metric("Est. Velocity", ai_result.get("velocity_estimation", "N/A"))
-                            st.metric("Principle", ai_result.get("physics_principle", "N/A"))
-                        
-                        with r_col2:
-                            st.info(f"**AI Explanation ({analysis_mode}):**\n\n{ai_result.get('explanation', 'No explanation provided.')}")
-                        
-                        # Show raw JSON for debugging (Collapsed)
-                        with st.expander("🛠️ View Raw Gemini Response (JSON)"):
-                            st.json(ai_result)
-
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
-                    # Uncomment for deep debugging:
-                    # import traceback
-                    # st.text(traceback.format_exc())
-                
-                finally:
-                    # Clean up the temp file
-                    if os.path.exists(tfile_path):
-                        os.remove(tfile_path)
+if __name__ == "__main__":
+    main()
