@@ -654,7 +654,7 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
             "velocity_estimation": "Fast horizontal motion pre-collision at approximately 15-18 m/s, dramatic deceleration upon impact",
             "physics_principle": "Conservation of Momentum and Coefficient of Restitution",
             "explanation": "The collision between the steel sphere and target exemplifies conservation of momentum in the horizontal direction, with ∑p_before = ∑p_after when considering the sphere-target system. The coefficient of restitution e = (v₂' - v₁')/(v₁ - v₂) characterizes the energy dissipation, with e ≈ 0.8-0.9 expected for steel-steel contact. The collision duration Δt ≈ 10⁻⁴ s produces impulsive forces F·Δt = Δp of order 10³ N based on the momentum change. Detailed analysis requires considering the contact mechanics via Hertzian theory, accounting for elastic deformation at the contact patch with stresses σ ~ E(a/R)^(1/2), where E is Young's modulus. Energy balance shows kinetic energy partitioned into elastic potential energy during compression, then partially recovered during restitution, with losses due to plastic deformation and acoustic emission. The observed trajectory post-collision can be analyzed in the center-of-mass frame to separate relative and center-of-mass motion components."
-        }
+        }}
 
         ## Edge Cases and Special Scenarios
 
