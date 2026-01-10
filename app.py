@@ -79,6 +79,7 @@ def extract_and_sample_frames(video_path, num_samples=3):
     """
     Extracts frames and picks exactly 3 distinct moments: Start, Middle, End.
     """
+    # Optimized stride for speed
     generator = get_video_frames_generator(video_path, stride=5, resize_width=400)
     tracker = MotionTracker()
     
@@ -97,11 +98,14 @@ def extract_and_sample_frames(video_path, num_samples=3):
     total = len(all_frames)
     if total == 0: return [], []
     
+    # Explicitly pick 0% (Start), 50% (Peak Action), 90% (Result)
     idx_start = 0
     idx_mid = total // 2
     idx_end = int(total * 0.90) 
     
+    # Ensure indices are unique if video is very short
     indices = sorted(list(set([idx_start, idx_mid, idx_end])))
+    
     sampled_frames = [all_frames[i] for i in indices]
     
     return sampled_frames, all_frames
@@ -118,8 +122,11 @@ def render_sidebar():
             ["ELI5 (Basic)", "High School Physics", "Undergrad (Advanced)", "PhD (Quantum/Relativity)"]
         )
         
+        st.markdown("---")
+        show_raw = st.toggle("Show Raw Video Player", value=False)
+        
         st.info("System Ready: High-Speed Mode")
-        return mode
+        return mode, show_raw
 
 def render_header():
     st.markdown('<div class="main-header">PhysicsLens AI</div>', unsafe_allow_html=True)
@@ -151,7 +158,7 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         context_subset = all_frames_context[::step][:10]
         ai_text_result = analyze_physics_with_gemini(context_subset, analysis_level=analysis_mode)
         
-        # 3. Visual Reasoning
+        # 3. Visual Reasoning (The Heavy Lifting)
         status.write(f"📐 Calculating Force Vectors for {len(sampled_frames)} keyframes...")
         
         final_keyframes = []
@@ -161,19 +168,19 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         for idx, kf in enumerate(sampled_frames):
             vis_frame = kf['frame'].copy()
             
-            # AI Call
+            # AI Call for High Fidelity Overlay
             coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
             
             if coords:
                 # Apply high-fidelity AI overlay
                 vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, coords)
                 
-                # Smart Caption
+                # Create a smart caption from the vectors found
                 vectors_found = [v.get('name', 'Force') for v in coords.get('vectors', [])]
-                vector_str = ", ".join(vectors_found[:2])
+                vector_str = ", ".join(vectors_found[:2]) # Top 2 forces
                 kf['caption'] = f"Forces: {vector_str}"
             else:
-                # Fallback
+                # Fallback to CV if AI times out
                 center = kf.get('center')
                 vel = kf.get('velocity', (0,0))
                 if center:
@@ -183,6 +190,7 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
             kf['processed_image'] = vis_frame
             final_keyframes.append(kf)
             
+            # Update progress bar
             progress_bar.progress((idx + 1) / total_kfs)
 
         status.update(label="✅ Analysis Complete", state="complete", expanded=False)
@@ -209,7 +217,9 @@ def render_results(analysis_mode):
     # --- 2. Keyframe Gallery (3 distinct frames) ---
     st.subheader("🎞️ Physics Timeline")
     
+    # Single row of 3 images
     cols = st.columns(3)
+    
     labels = ["Initial State", "Mid-Motion", "Final State"]
     
     for idx, col in enumerate(cols):
@@ -232,7 +242,7 @@ def render_results(analysis_mode):
 
 # --- MAIN EXECUTION ---
 def main():
-    analysis_mode = render_sidebar()
+    analysis_mode, show_raw_video = render_sidebar()
     render_header()
     
     uploaded_file = st.file_uploader("Upload footage to begin analysis...", type=['mp4', 'mov', 'avi'])
@@ -244,9 +254,12 @@ def main():
             
         tfile_path = save_uploaded_file(uploaded_file)
         
-        # --- 1. SHOW VIDEO PLAYER FIRST ---
-        st.markdown("### 📽️ Input Footage")
-        st.video(uploaded_file)
+        if show_raw_video:
+            # --- MODIFIED: Wrap video in columns to shrink it ---
+            c1, c2, c3 = st.columns([1, 2, 1]) # Middle column is 50% width
+            with c2:
+                st.caption("Raw Footage Preview")
+                st.video(uploaded_file)
         
         api_key = st.secrets.get("GOOGLE_API_KEY")
         if not api_key:
@@ -256,7 +269,6 @@ def main():
         if not st.session_state.processing_complete:
             process_pipeline(tfile_path, api_key, analysis_mode)
             
-        # --- 2. SHOW RESULTS AFTER ---
         if st.session_state.processing_complete:
             render_results(analysis_mode)
             
