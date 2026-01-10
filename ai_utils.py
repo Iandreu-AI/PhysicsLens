@@ -543,12 +543,12 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
         **CRITICAL:** Return ONLY a valid JSON object. NO markdown formatting. NO ```json``` wrappers. NO explanatory text before or after.
 
         **JSON Structure:**
-        {
+        {{
             "main_object": "Specific object name",
             "velocity_estimation": "Qualitative + quantitative motion description",
             "physics_principle": "Primary physics principle name",
             "explanation": "Level-appropriate explanation of the physics ({analysis_level} level)"
-        }
+        }}
 
         **Field Specifications:**
 
@@ -622,34 +622,34 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
 
         ### Example 1: Basketball Shot (Intermediate Level)
 
-        {
+        {{
             "main_object": "Basketball",
             "velocity_estimation": "Moderate upward and forward motion, approximately 8-10 m/s at release, following parabolic arc",
             "physics_principle": "Projectile Motion",
             "explanation": "The basketball undergoes projectile motion after leaving the player's hands, with its trajectory determined by the initial velocity components and gravitational acceleration. The horizontal velocity remains approximately constant (neglecting air resistance), while the vertical velocity decreases due to gravity until reaching the apex, then increases downward. The parabolic path results from the independent horizontal and vertical motions, with gravity providing constant downward acceleration of 9.8 m/s². The range and maximum height depend on the launch angle and initial speed."
-        }
+        }}
 
         ### Example 2: Pendulum Swing (Beginner Level)
 
-        {
+        {{
             "main_object": "Pendulum bob",
             "velocity_estimation": "Moderate swinging motion, fastest at the bottom (approximately 2-3 m/s), slowing at the ends",
             "physics_principle": "Simple Harmonic Motion and Conservation of Energy",
             "explanation": "The pendulum swings back and forth because gravity pulls it downward while the string keeps it moving in an arc. When the bob is at the highest points of the swing, it moves slowly and has stored energy (potential energy). As it swings down, it speeds up and that stored energy converts to movement energy (kinetic energy). At the bottom, it's moving fastest, then slows down again as it swings back up the other side. This process repeats, creating the regular back-and-forth motion we see."
-        }
+        }}
 
         ### Example 3: Rolling Ball on Incline (Advanced Level)
 
-        {
+        {{
             "main_object": "Solid sphere",
             "velocity_estimation": "Accelerating downward along incline, approximately 3-4 m/s and increasing, with both translational and rotational motion",
             "physics_principle": "Rotational Dynamics and Conservation of Energy",
             "explanation": "The sphere undergoes rolling motion down the incline, characterized by coupled translational and rotational kinematics satisfying the no-slip condition v = ωR. The acceleration down the incline is a = g sinθ / (1 + I/mR²), where I = (2/5)mR² for a solid sphere, yielding a = (5/7)g sinθ. Energy analysis shows gravitational potential energy mgh converting to both translational kinetic energy (½mv²) and rotational kinetic energy (½Iω²). The reduced acceleration compared to a sliding block (which would be g sinθ) results from the rotational inertia requiring torque from the friction force. Static friction at the contact point provides the necessary torque for rotation while preventing slipping, with fs = (2/7)mg sinθ for the solid sphere."
-        }
+        }}
 
         ### Example 4: Collision (Expert Level)
 
-        {
+        {{
             "main_object": "Steel ball bearing",
             "velocity_estimation": "Fast horizontal motion pre-collision at approximately 15-18 m/s, dramatic deceleration upon impact",
             "physics_principle": "Conservation of Momentum and Coefficient of Restitution",
