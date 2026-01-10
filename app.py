@@ -75,39 +75,80 @@ def save_uploaded_file(uploaded_file):
         st.error(f"Error handling file: {e}")
         return None
 
+def play_live_inference(video_path):
+    """
+    Plays the video with real-time CV overlays instead of raw footage.
+    """
+    cap = cv2.VideoCapture(video_path)
+    tracker = MotionTracker()
+    
+    st_frame = st.empty()
+    st_info = st.empty()
+    
+    # Processing stride (play every Nth frame to keep up with UI)
+    stride = 2 
+    frame_count = 0
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        if frame_count % stride == 0:
+            # 1. Resize for UI performance
+            frame = cv2.resize(frame, (640, 360))
+            
+            # 2. Track Motion
+            center, velocity = tracker.process_frame(frame)
+            
+            # 3. Apply Overlays (Using your overlay_utils.py)
+            h, w = frame.shape[:2]
+            display_center = center if center else (w//2, h//2)
+            
+            # Gravity (Static)
+            PhysicsOverlay.draw_vector(frame, display_center, (0, 30), "Mg", PhysicsOverlay.COLOR_FORCE)
+            
+            # Velocity (Dynamic)
+            vx, vy = velocity
+            if abs(vx) > 1 or abs(vy) > 1:
+                PhysicsOverlay.draw_vector(frame, display_center, (vx, vy), "Vel", PhysicsOverlay.COLOR_VELOCITY, scale=4.0)
+            
+            # HUD
+            PhysicsOverlay.draw_hud(frame, {"Status": "Tracking", "Vx": f"{vx:.1f}", "Vy": f"{vy:.1f}"})
+
+            # 4. Display
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            st_frame.image(frame_rgb, channels="RGB", use_container_width=True)
+            
+        frame_count += 1
+
+    cap.release()
+    st_info.caption("Preview complete. Analysis below.")
+
 def extract_and_sample_frames(video_path, num_samples=3):
     """
     Extracts frames and picks exactly 3 distinct moments: Start, Middle, End.
     """
-    # Optimized stride for speed
     generator = get_video_frames_generator(video_path, stride=5, resize_width=400)
     tracker = MotionTracker()
-    
     all_frames = []
     
-    # 1. Process video for tracking data
     for meta in generator:
         clean_frame = meta['frame'].copy()
         center, velocity = tracker.process_frame(clean_frame)
-        
         meta['center'] = center
         meta['velocity'] = velocity
         all_frames.append(meta)
         
-    # 2. Sample 3 Keyframes (Start, Middle, End)
     total = len(all_frames)
     if total == 0: return [], []
     
-    # Explicitly pick 0% (Start), 50% (Peak Action), 90% (Result)
     idx_start = 0
     idx_mid = total // 2
     idx_end = int(total * 0.90) 
-    
-    # Ensure indices are unique if video is very short
     indices = sorted(list(set([idx_start, idx_mid, idx_end])))
     
     sampled_frames = [all_frames[i] for i in indices]
-    
     return sampled_frames, all_frames
 
 # --- UI COMPONENT FUNCTIONS ---
@@ -116,17 +157,13 @@ def render_sidebar():
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/physics.png", width=64)
         st.markdown("### Analysis Config")
-        
         mode = st.selectbox(
             "Complexity Level",
             ["ELI5 (Basic)", "High School Physics", "Undergrad (Advanced)", "PhD (Quantum/Relativity)"]
         )
-        
         st.markdown("---")
-        show_raw = st.toggle("Show Raw Video Player", value=False)
-        
-        st.info("System Ready: High-Speed Mode")
-        return mode, show_raw
+        st.info("System Ready: Live Inference Mode")
+        return mode
 
 def render_header():
     st.markdown('<div class="main-header">PhysicsLens AI</div>', unsafe_allow_html=True)
@@ -142,45 +179,35 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         st.error("Missing ai_utils.py")
         st.stop()
 
-    with st.status("🚀 Initializing Physics Engine...", expanded=True) as status:
+    with st.status("🚀 Processing Video Intelligence...", expanded=True) as status:
         
-        # 1. Computer Vision Pass
-        status.write("📷 Scanning video structure...")
+        status.write("📷 Sampling Keyframes...")
         sampled_frames, all_frames_context = extract_and_sample_frames(tfile_path, num_samples=3)
         
         if not sampled_frames:
             status.update(label="❌ Error reading video", state="error")
             return
 
-        # 2. Semantic Analysis
-        status.write("🧠 Generating Conceptual Physics Model...")
+        status.write("🧠 Generating Conceptual Model...")
         step = max(1, len(all_frames_context) // 10)
         context_subset = all_frames_context[::step][:10]
         ai_text_result = analyze_physics_with_gemini(context_subset, analysis_level=analysis_mode)
         
-        # 3. Visual Reasoning (The Heavy Lifting)
-        status.write(f"📐 Calculating Force Vectors for {len(sampled_frames)} keyframes...")
-        
+        status.write(f"📐 Calculating Vectors for {len(sampled_frames)} keyframes...")
         final_keyframes = []
         progress_bar = st.progress(0)
         total_kfs = len(sampled_frames)
         
         for idx, kf in enumerate(sampled_frames):
             vis_frame = kf['frame'].copy()
-            
-            # AI Call for High Fidelity Overlay
             coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
             
             if coords:
-                # Apply high-fidelity AI overlay
                 vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, coords)
-                
-                # Create a smart caption from the vectors found
                 vectors_found = [v.get('name', 'Force') for v in coords.get('vectors', [])]
-                vector_str = ", ".join(vectors_found[:2]) # Top 2 forces
+                vector_str = ", ".join(vectors_found[:2])
                 kf['caption'] = f"Forces: {vector_str}"
             else:
-                # Fallback to CV if AI times out
                 center = kf.get('center')
                 vel = kf.get('velocity', (0,0))
                 if center:
@@ -189,12 +216,9 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
             
             kf['processed_image'] = vis_frame
             final_keyframes.append(kf)
-            
-            # Update progress bar
             progress_bar.progress((idx + 1) / total_kfs)
 
         status.update(label="✅ Analysis Complete", state="complete", expanded=False)
-        
         st.session_state.analysis_results = ai_text_result
         st.session_state.keyframes = final_keyframes
         st.session_state.processing_complete = True
@@ -207,34 +231,26 @@ def render_results(analysis_mode):
         st.error("No results found. Please re-analyze.")
         return
 
-    # --- 1. Top Level Metrics ---
     st.divider()
     m1, m2, m3 = st.columns(3)
     m1.metric("Object Detected", result.get("main_object", "Unknown"))
     m2.metric("Primary Principle", result.get("physics_principle", "Analysis Pending"))
     m3.metric("Est. Velocity", result.get("velocity_estimation", "Calculating..."))
     
-    # --- 2. Keyframe Gallery (3 distinct frames) ---
     st.subheader("🎞️ Physics Timeline")
-    
-    # Single row of 3 images
     cols = st.columns(3)
-    
     labels = ["Initial State", "Mid-Motion", "Final State"]
     
     for idx, col in enumerate(cols):
         if idx < len(keyframes):
             kf = keyframes[idx]
             label = labels[idx] if idx < 3 else "Keyframe"
-            
             with col:
                 st.image(kf['processed_image'], use_container_width=True, channels="RGB")
                 st.markdown(f"<div class='caption-text'><strong>{label}</strong> (t={kf['timestamp']:.2f}s)<br>{kf.get('caption', '')}</div>", unsafe_allow_html=True)
 
-    # --- 3. Deep Dive Summary ---
     st.divider()
     st.subheader(f"📝 Expert Analysis ({analysis_mode})")
-    
     if result.get("error"):
         st.error(f"Analysis Error: {result.get('explanation')}")
     else:
@@ -242,7 +258,7 @@ def render_results(analysis_mode):
 
 # --- MAIN EXECUTION ---
 def main():
-    analysis_mode, show_raw_video = render_sidebar()
+    analysis_mode = render_sidebar()
     render_header()
     
     uploaded_file = st.file_uploader("Upload footage to begin analysis...", type=['mp4', 'mov', 'avi'])
@@ -254,16 +270,16 @@ def main():
             
         tfile_path = save_uploaded_file(uploaded_file)
         
-        if show_raw_video:
-            # --- MODIFIED: Wrap video in columns to shrink it ---
-            c1, c2, c3 = st.columns([1, 2, 1]) # Middle column is 50% width
-            with c2:
-                st.caption("Raw Footage Preview")
-                st.video(uploaded_file)
+        # --- NEW: Live Inference Player instead of Raw Video ---
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            st.caption("Live Physics Preview (CV Tracking)")
+            # This plays the video WITH overlays immediately
+            play_live_inference(tfile_path)
         
         api_key = st.secrets.get("GOOGLE_API_KEY")
         if not api_key:
-            st.warning("⚠️ Google API Key missing. Add it to .streamlit/secrets.toml to proceed.")
+            st.warning("⚠️ Google API Key missing.")
             st.stop()
             
         if not st.session_state.processing_complete:
