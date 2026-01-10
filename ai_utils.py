@@ -13,357 +13,114 @@ def configure_gemini(api_key):
         print(f"Configuration Error: {e}")
         return False
 
-def get_physics_overlay_coordinates(frame_bgr):
+def get_batch_physics_overlays(frames_bgr_list):
     """
-    Generates Free Body Diagram coordinates.
+    Analyzes multiple frames in a single API call to ensure 
+    temporal consistency and reduce latency.
     """
     try:
-        model = genai.GenerativeModel('gemini-3-pro-preview')
+        model = genai.GenerativeModel('gemini-2.0-flash-exp') # Flash is significantly faster for Vision
         
-        # Convert BGR to RGB
-        color_converted = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        pil_image = PIL.Image.fromarray(color_converted)
+        # 1. Prepare the Payload
+        prompt_parts = [
+            """
+            # Principal Physics Analysis Engine
+            ## 1. Role & Expertise
+            You are a **High-Precision Physics Analysis Engine**. Your core function is to derive precise vector data from video keyframes for automated physics visualization. You excel at:
+            *   **Object Tracking**: Maintaining consistent object identification across image sequences.
+            *   **Force Vector Decomposition**: Deconstructing motion into constituent forces (gravity, applied force, friction, normal force).
+            *   **Coordinate Normalization**: Mapping pixel coordinates to a standardized 0.0-1.0 range.
+            *   **JSON Encoding**: Generating strictly formatted JSON output optimized for downstream processing.
 
-        prompt = """
-You are an advanced Physics Engine Computer Vision module specialized in analyzing images to identify moving objects and their associated physics vectors.
+            ## 2. Input Context
+            You are provided a sequence of keyframes extracted from a video of a dynamic physics phenomenon. You do not have access to the full video, only discrete frames.
 
-## Your Capabilities and Expertise
-- Object detection and tracking in static images and video frames
-- Physics analysis: identifying forces, velocities, and motion patterns
-- Spatial reasoning and coordinate system understanding
-- Vector representation of physical quantities (force, velocity, acceleration)
+            ## 3. Primary Task
+            *   **Core**: For **EACH** provided frame, output a JSON structure containing object position and force vector data.
+            *   **Consistency**: The identified "MAIN moving object" must remain consistent throughout the entire sequence. If the object is occluded, estimate its position based on previous trajectory.
 
-## Task: Physical Object and Vector Analysis
+            ## 4. Force Vector Definitions
+            You must identify and approximate the following forces (if present):
+            *   **Gravity**: Always present (magnitude depends on the identified object's mass, which you must consistently ESTIMATE). Direction: down (0, 1).
+            *   **Velocity**: The instantaneous direction of motion derived from the difference in object center positions between consecutive frames.
+            *   **Applied Force**: Any external force visibly acting on the object (e.g., a push, a pull). Direction and magnitude must be estimated.
+            *   **Normal Force**: If the object is in contact with a surface, estimate the normal force (perpendicular to the surface).
+            *   **Friction**: If motion is slowing down and there is contact with a surface, approximate the force of friction (opposite to the direction of motion).
 
-### Primary Objective
-Analyze the provided image and identify the MAIN moving physical object, then determine the relevant physics vectors acting on or associated with that object.
+            ## 5. Output Specification
+            **Enforce the following JSON output structure**:
+            ```json
+            [
+            {
+                "frame_index": 0,
+                "object_center": [ x, y ],
+                "vectors": [
+                { "name": "Gravity", "start": [x, y], "end": [x, y], "color": "red" },
+                { "name": "Velocity", "start": [x, y], "end": [x, y], "color": "blue" },
+                { "name": "Applied Force", "start": [x, y], "end": [x, y], "color": "green" }
+                ]
+            },
+            ...
+            ]
+            ```
 
-### Analysis Process
+            ### Constraints:
+            1.  **Strict JSON Only**: Absolutely NO Markdown, comments, or additional text.
+            2.  **Coordinate Normalization**: `x` and `y` values MUST be in the range `0.0` to `1.0`. Normalize based on the assumed frame dimensions (you are NOT given the actual dimensions).
+            3.  **Consistent Colors**:
+                *   "Gravity": "red"
+                *   "Velocity": "blue"
+                *   "Applied Force": "green"
+                *   "Normal Force": "yellow"
+                *   "Friction": "orange"
+            4.  **Force Vector Origin**: All force vectors originate from the `object_center`.
 
-#### Step 1: Object Identification
-Examine the image and identify:
-- **The primary moving object**: The most significant object in motion or the focus of the physical scenario
-  - Examples: ball in flight, sliding block, swinging pendulum, rolling wheel, falling object
-- **Object characteristics**: Shape, size, apparent mass, position in frame
-- **Motion context**: Is it airborne? On a surface? Suspended? In collision?
+            ## 6. Input Data Format
+            You will be provided a sequence of text descriptions for each frame. You must parse these descriptions to infer object position and motion. For example:
 
-**Selection criteria for "main object":**
-- Object exhibiting most obvious motion or physics principle
-- Object that is the clear subject of the scene
-- If multiple objects, choose the one with richest physics interaction
-- Exclude background elements, stationary reference objects, or trivial motion
+            ```text
+            "Frame 0: A red ball is rolling to the right on a flat surface. The ball is in the center of the frame."
+            "Frame 1: The red ball is now slightly to the right and a bit lower. It appears to be slowing down."
+            "Frame 2: The ball continues to move right, but much slower. It is near the bottom of the frame."
+            ```
 
-#### Step 2: Determine Object Center
-Calculate the geometric center (centroid) of the identified object:
-- For spherical/circular objects: center of the circle
-- For rectangular objects: intersection of diagonals
-- For irregular objects: approximate center of mass
-- Express as normalized coordinates (0.0 to 1.0) where:
-  - x: 0.0 = left edge, 1.0 = right edge of image
-  - y: 0.0 = top edge, 1.0 = bottom edge of image
+            ## 7. Important Notes
+            *   **Reasoning Chain**: Briefly justify your force vector estimations in comments *internally* but *do not include these justifications in the final JSON output.*
+            *   **Mass Estimation**: You must estimate the mass of the object in order to derive the gravity vector magnitude. *Be consistent with this estimation across all frames.*
 
-#### Step 3: Identify Relevant Physics Vectors
-Based on the object's motion and context, determine which forces and motion vectors are present:
+            ## 8. Execution
+            Begin processing the keyframes. Output **ONLY** the JSON data.
 
-**Common Vector Types:**
+            """
+        ]
 
-1. **Gravity** (Always present for objects with mass)
-   - Direction: Downward (vertically down in image frame)
-   - Start: Object center
-   - End: Below object center, length proportional to expected gravitational influence
-   - Color: "red"
+        # 2. Append Images to Prompt
+        for idx, frame in enumerate(frames_bgr_list):
+            # Convert BGR (OpenCV) to RGB (PIL)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = PIL.Image.fromarray(rgb)
+            
+            prompt_parts.append(f"--- Frame {idx} ---")
+            prompt_parts.append(pil_img)
 
-2. **Velocity** (For objects in motion)
-   - Direction: Along the direction of motion (tangent to path)
-   - Start: Object center
-   - End: Points in direction of travel, length indicates relative speed
-   - Color: "green"
-   - If object appears stationary, omit this vector
-
-3. **Normal Force** (For objects in contact with a surface)
-   - Direction: Perpendicular to the contact surface, pointing away from surface
-   - Start: Object center or contact point
-   - End: Perpendicular to surface
-   - Color: "blue"
-   - Only include if object is resting on or sliding along a surface
-
-4. **Friction** (For objects sliding/rolling on a surface)
-   - Direction: Opposite to direction of motion, parallel to surface
-   - Start: Object center or contact point
-   - End: Points opposite to velocity direction
-   - Color: "orange"
-   - Only include if there's clear surface contact and motion
-
-5. **Tension** (For suspended/connected objects)
-   - Direction: Along rope/string/connection toward anchor point
-   - Start: Object center or connection point
-   - End: Toward the suspension point
-   - Color: "purple"
-   - Only include if object is clearly suspended by a rope, string, or similar
-
-6. **Air Resistance/Drag** (For high-speed objects through air)
-   - Direction: Opposite to velocity
-   - Start: Object center
-   - End: Points opposite to motion direction
-   - Color: "cyan"
-   - Only include if object is moving through fluid (air/water) at noticeable speed
-
-7. **Applied Force** (For objects being pushed/pulled)
-   - Direction: Direction of the applied force
-   - Start: Point of force application
-   - End: Direction the force is applied
-   - Color: "yellow"
-   - Only include if there's visible force application (hand pushing, etc.)
-
-**Selection Guidelines:**
-- Include only vectors that are physically relevant to this specific scenario
-- Typical scenarios have 2-4 vectors (don't force all vector types)
-- Vector lengths should reflect relative magnitudes when possible
-- Ensure vectors originate from physically meaningful locations
-
-#### Step 4: Calculate Vector Coordinates
-For each identified vector, calculate normalized coordinates:
-
-**Start Point:**
-- Usually the object center: `[object_center_x, object_center_y]`
-- Exception: Contact forces may start at contact point
-- Normalized: 0.0 to 1.0 range
-
-**End Point:**
-- Calculate based on vector direction and reasonable magnitude
-- Formula: `end = start + direction × magnitude_scale`
-- Ensure end coordinates remain in valid range (0.0 to 1.0)
-- If calculation exceeds bounds, scale down to fit within frame
-
-**Direction Guidelines:**
-- Gravity: end_y > start_y (downward)
-- Velocity: based on motion direction (horizontal, upward, diagonal)
-- Normal: perpendicular to surface, typically upward
-- Keep vectors visually clear (not too short or too long)
-
-**Magnitude Representation:**
-- Vector length in normalized space should be 0.05 to 0.3 for visibility
-- Adjust based on relative importance: stronger forces = longer vectors
-- Maintain physical relationships (e.g., normal force magnitude often similar to gravity)
-
-### Output Format Requirements
-
-**CRITICAL:** Return ONLY a valid JSON object. NO markdown code blocks. NO ```json``` wrappers. NO explanatory text.
-
-**JSON Structure:**
-{
-    "object_center": [x, y],
-    "vectors": [
-        {
-            "name": "Vector Name",
-            "start": [x, y],
-            "end": [x, y],
-            "color": "color_name"
-        }
-    ]
-}
-
-**Field Specifications:**
-
-- **object_center**: `[float, float]`
-  - Normalized x, y coordinates of the main object's center
-  - Range: [0.0, 1.0] for both x and y
-  - Example: `[0.5, 0.3]` means center-horizontal, upper third vertically
-
-- **vectors**: `Array of vector objects`
-  - Each vector has exactly 4 fields: name, start, end, color
-  - Minimum: 1 vector (at least gravity for most scenarios)
-  - Maximum: 6 vectors (avoid overcrowding)
-  - Order: List most important/dominant vectors first
-
-- **name**: `string`
-  - Physics-accurate name: "Gravity", "Velocity", "Normal Force", "Friction", "Tension", "Air Resistance", "Applied Force"
-  - Use standard physics terminology
-  - Capitalize properly
-
-- **start**: `[float, float]`
-  - Normalized x, y coordinates where vector arrow begins
-  - Typically object_center, but may differ for contact forces
-  - Range: [0.0, 1.0]
-
-- **end**: `[float, float]`
-  - Normalized x, y coordinates where vector arrow points
-  - Must differ from start (non-zero length)
-  - Range: [0.0, 1.0]
-  - Direction must be physically accurate for the named vector
-
-- **color**: `string`
-  - Use standard color names for consistency:
-    - "red" → Gravity
-    - "green" → Velocity
-    - "blue" → Normal Force
-    - "orange" → Friction
-    - "purple" → Tension
-    - "cyan" → Air Resistance
-    - "yellow" → Applied Force
-  - Lowercase, no special characters
-
-### Validation Rules
-
-Before outputting, verify:
-
-✅ **JSON Validity:**
-- Proper syntax: braces, brackets, commas, quotes
-- No trailing commas
-- Double quotes for strings (not single quotes)
-
-✅ **Coordinate Constraints:**
-- All x and y values are floats in range [0.0, 1.0]
-- object_center is within bounds
-- All vector start and end points are within bounds
-- Vector start ≠ end (non-zero length)
-
-✅ **Physical Accuracy:**
-- Gravity points downward (end_y > start_y)
-- Velocity direction matches apparent motion
-- Normal force perpendicular to surface
-- Vector names match actual physics principles present
-- No contradictory vectors (e.g., velocity both left and right)
-
-✅ **Completeness:**
-- Object center is specified
-- At least 1 vector is present
-- Each vector has all 4 required fields
-- Color names match standard mapping
-
-### Example Outputs
-
-**Example 1: Ball in Projectile Motion**
-{
-    "object_center": [0.6, 0.4],
-    "vectors": [
-        {
-            "name": "Velocity",
-            "start": [0.6, 0.4],
-            "end": [0.75, 0.35],
-            "color": "green"
-        },
-        {
-            "name": "Gravity",
-            "start": [0.6, 0.4],
-            "end": [0.6, 0.55],
-            "color": "red"
-        }
-    ]
-}
-
-**Example 2: Block Sliding on Incline**
-{
-    "object_center": [0.5, 0.6],
-    "vectors": [
-        {
-            "name": "Gravity",
-            "start": [0.5, 0.6],
-            "end": [0.5, 0.75],
-            "color": "red"
-        },
-        {
-            "name": "Normal Force",
-            "start": [0.5, 0.6],
-            "end": [0.45, 0.48],
-            "color": "blue"
-        },
-        {
-            "name": "Friction",
-            "start": [0.5, 0.6],
-            "end": [0.42, 0.58],
-            "color": "orange"
-        },
-        {
-            "name": "Velocity",
-            "start": [0.5, 0.6],
-            "end": [0.58, 0.62],
-            "color": "green"
-        }
-    ]
-}
-
-**Example 3: Pendulum at Swing**
-{
-    "object_center": [0.4, 0.7],
-    "vectors": [
-        {
-            "name": "Tension",
-            "start": [0.4, 0.7],
-            "end": [0.45, 0.5],
-            "color": "purple"
-        },
-        {
-            "name": "Gravity",
-            "start": [0.4, 0.7],
-            "end": [0.4, 0.85],
-            "color": "red"
-        },
-        {
-            "name": "Velocity",
-            "start": [0.4, 0.7],
-            "end": [0.52, 0.72],
-            "color": "green"
-        }
-    ]
-}
-
-### Error Handling
-
-**If the image is unclear or ambiguous:**
-- Make best reasonable interpretation based on visual cues
-- Prioritize most likely physics scenario
-- Include core vectors that would apply to most interpretations (gravity almost always applies)
-
-**If no clear moving object:**
-- Identify most prominent physical object
-- Include relevant static forces (gravity, normal force if on surface)
-- Omit velocity vector if no motion is apparent
-
-**If image quality is too poor:**
-- Still attempt analysis with available information
-- Focus on gross features (large objects, clear surfaces)
-- Reduce vector count to most certain forces only
-
-### Coordinate System Reference
-```
-Image Frame (Normalized Coordinates):
-(0.0, 0.0) ─────────────────── (1.0, 0.0)
-    │                                │
-    │         Screen/Image           │
-    │                                │
-    │        (0.5, 0.5) = Center     │
-    │                                │
-(0.0, 1.0) ─────────────────── (1.0, 1.0)
-
-X-axis: Left (0.0) → Right (1.0)
-Y-axis: Top (0.0) → Bottom (1.0)
-```
-
-### Physical Direction Conventions
-
-- **Downward (Gravity)**: Increase Y (e.g., start_y=0.4 → end_y=0.5)
-- **Upward (Normal, Thrust)**: Decrease Y (e.g., start_y=0.6 → end_y=0.5)
-- **Rightward**: Increase X (e.g., start_x=0.4 → end_x=0.5)
-- **Leftward**: Decrease X (e.g., start_x=0.6 → end_x=0.5)
-
----
-
-**Now analyze the provided image and return your JSON output.**
-"""
-
-        response = model.generate_content([prompt, pil_image])
+        # 3. Fire Single API Call
+        response = model.generate_content(prompt_parts)
         
-        # CLEANUP JSON
+        # 4. Parse Response
         text = response.text
         text = text.replace("```json", "").replace("```", "").strip()
         
-        # Return parsed JSON
-        return json.loads(text)
+        # Robust parsing: ensure we get a list
+        data = json.loads(text)
+        if isinstance(data, dict): 
+            # Handle edge case where AI wraps list in a dict key like {"frames": [...]}
+            data = data.get("frames", data.get("data", [data]))
+            
+        return data
 
     except Exception as e:
-        print(f"Overlay Error: {e}")
-        return None
+        print(f"Batch Overlay Error: {e}")
+        return []
 
 def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics"):
     """

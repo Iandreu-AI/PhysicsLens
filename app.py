@@ -179,9 +179,9 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         st.error("Missing ai_utils.py")
         st.stop()
 
-    with st.status("🚀 Processing Video Intelligence...", expanded=True) as status:
+    with st.status(" Processing Video ...", expanded=True) as status:
         
-        status.write("📷 Sampling Keyframes...")
+        status.write(" Sampling Keyframes...")
         sampled_frames, all_frames_context = extract_and_sample_frames(tfile_path, num_samples=3)
         
         if not sampled_frames:
@@ -193,26 +193,40 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         context_subset = all_frames_context[::step][:10]
         ai_text_result = analyze_physics_with_gemini(context_subset, analysis_level=analysis_mode)
         
-        status.write(f"📐 Calculating Vectors for {len(sampled_frames)} keyframes...")
+        status.write(f"Calculating Vectors for {len(sampled_frames)} keyframes...")
+        # Prepare list of raw BGR frames for the batch function
+        raw_frames_for_ai = [kf['original_frame_bgr'] for kf in sampled_frames]
+        
+        # Single API Call
+        batch_coords = get_batch_physics_overlays(raw_frames_for_ai)
+        
         final_keyframes = []
         progress_bar = st.progress(0)
         total_kfs = len(sampled_frames)
         
+        # 3. Merge Results
         for idx, kf in enumerate(sampled_frames):
             vis_frame = kf['frame'].copy()
-            coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
             
-            if coords:
-                vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, coords)
-                vectors_found = [v.get('name', 'Force') for v in coords.get('vectors', [])]
+            # Find matching data in batch response (safely)
+            ai_data = next((item for item in batch_coords if item.get("frame_index") == idx), None)
+            
+            # Fallback if AI missed an index (rare but possible)
+            if not ai_data and idx < len(batch_coords):
+                ai_data = batch_coords[idx]
+
+            if ai_data:
+                vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, ai_data)
+                vectors_found = [v.get('name', 'Force') for v in ai_data.get('vectors', [])]
                 vector_str = ", ".join(vectors_found[:2])
                 kf['caption'] = f"Forces: {vector_str}"
             else:
+                # CV Fallback if AI fails specific frame
                 center = kf.get('center')
                 vel = kf.get('velocity', (0,0))
                 if center:
                     vis_frame = PhysicsOverlay.draw_vector(vis_frame, center, vel, "Motion", PhysicsOverlay.COLOR_VELOCITY, scale=3.0)
-                kf['caption'] = "Motion Tracking"
+                kf['caption'] = "Motion Tracking (CV Fallback)"
             
             kf['processed_image'] = vis_frame
             final_keyframes.append(kf)
