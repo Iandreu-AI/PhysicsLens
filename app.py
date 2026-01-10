@@ -85,15 +85,15 @@ def save_uploaded_file(uploaded_file):
 
 def extract_and_sample_frames(video_path, num_samples=6):
     """
-    Extracts frames, runs the CV tracker, and samples 6 evenly spaced keyframes.
-    Returns: List of frame_meta dicts.
+    Optimized: Higher stride and lower resolution for speed.
     """
-    generator = get_video_frames_generator(video_path, stride=2, resize_width=600)
+    # OPTIMIZATION: stride=5 (process every 5th frame), width=400 (faster processing)
+    generator = get_video_frames_generator(video_path, stride=5, resize_width=400)
     tracker = MotionTracker()
     
     all_frames = []
     
-    # 1. Process entire video for tracking data
+    # 1. Process video for tracking data
     for meta in generator:
         clean_frame = meta['frame'].copy()
         
@@ -107,12 +107,12 @@ def extract_and_sample_frames(video_path, num_samples=6):
         
     # 2. Sample N keyframes evenly
     total = len(all_frames)
-    if total == 0: return []
+    if total == 0: return [], []
     
     indices = np.linspace(0, total - 1, num_samples, dtype=int)
     sampled_frames = [all_frames[i] for i in indices]
     
-    return sampled_frames, all_frames # Return all frames for Gemini context if needed
+    return sampled_frames, all_frames
 
 # --- UI COMPONENT FUNCTIONS ---
 
@@ -129,7 +129,7 @@ def render_sidebar():
         st.markdown("---")
         show_raw = st.toggle("Show Raw Video Player", value=False)
         
-        st.info("System Ready: Gemini 1.5 + OpenCV")
+        st.info("System Ready: Optimized Mode")
         return mode, show_raw
 
 def render_header():
@@ -138,9 +138,8 @@ def render_header():
 
 def process_pipeline(tfile_path, api_key, analysis_mode):
     """
-    The Main Processing Orchestrator.
+    Optimized Pipeline: Batches operations and limits expensive AI calls.
     """
-    # Import locally to handle startup errors
     try:
         from ai_utils import configure_gemini, analyze_physics_with_gemini, get_physics_overlay_coordinates
         if not configure_gemini(api_key):
@@ -150,47 +149,59 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         st.error("Missing ai_utils.py")
         st.stop()
 
-    with st.status("🚀 Initializing Physics Engine...", expanded=True) as status:
+    with st.status("🚀 Accelerating Physics Engine...", expanded=True) as status:
         
-        # 1. Computer Vision Pass
-        status.write("📷 Extracting keyframes and tracking motion...")
+        # 1. Computer Vision Pass (Fast)
+        status.write("📷 Fast-Tracking Motion...")
         sampled_frames, all_frames_context = extract_and_sample_frames(tfile_path)
-        time.sleep(0.5) # UX Pacing
         
-        # 2. Semantic Analysis (Gemini Flash)
-        status.write("🧠 Generating physics summary...")
-        # We pass a subset of frames to Gemini for the text summary to save bandwidth
-        # Taking every 10th frame from context
-        context_subset = all_frames_context[::10] 
+        if not sampled_frames:
+            status.update(label="❌ Error reading video", state="error")
+            return
+
+        # 2. Semantic Analysis (Gemini Flash - Fast Model)
+        status.write("🧠 Generating Summary...")
+        # OPTIMIZATION: Only send max 10 frames to AI to reduce payload size
+        step = max(1, len(all_frames_context) // 10)
+        context_subset = all_frames_context[::step][:10]
+        
         ai_text_result = analyze_physics_with_gemini(context_subset, analysis_level=analysis_mode)
         
-        # 3. Visual Reasoning (Gemini Pro - FBD Generation)
-        status.write("📐 Calculating Free Body Diagrams for keyframes...")
+        # 3. Visual Reasoning (Gemini Pro - Expensive Model)
+        # OPTIMIZATION: Only call Gemini Pro on ONE "Hero Frame" (the middle one)
+        # The other frames will use the instant CV tracker data.
+        status.write("📐 Calculating Vectors...")
+        
+        hero_index = len(sampled_frames) // 2
         final_keyframes = []
-        progress_bar = st.progress(0)
         
         for idx, kf in enumerate(sampled_frames):
-            # Call Gemini for coordinates for this specific frame
-            coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
-            
-            # Apply the AI overlay immediately
             vis_frame = kf['frame'].copy()
             
-            # Fallback: If AI fails to return coords, use CV tracker data
-            if coords:
-                vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, coords)
-                kf['caption'] = f"AI Detected: {coords.get('vectors', [{}])[0].get('name', 'Object')}"
+            # Logic: Hero Frame gets AI (Smart), Others get CV (Fast)
+            if idx == hero_index:
+                # Expensive Call (~3s)
+                coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
+                if coords:
+                    vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, coords)
+                    kf['caption'] = "✨ AI Full Analysis (Keyframe)"
+                else:
+                    # Fallback if AI fails
+                    center = kf.get('center')
+                    vel = kf.get('velocity', (0,0))
+                    if center:
+                        vis_frame = PhysicsOverlay.draw_vector(vis_frame, center, vel, "Vel", PhysicsOverlay.COLOR_VELOCITY, scale=3.0)
+                    kf['caption'] = "CV Tracking"
             else:
-                # Use CV Fallback
+                # Instant Call (0s)
                 center = kf.get('center')
                 vel = kf.get('velocity', (0,0))
                 if center:
-                    vis_frame = PhysicsOverlay.draw_vector(vis_frame, center, vel, "Velocity", PhysicsOverlay.COLOR_VELOCITY, scale=5.0)
-                kf['caption'] = "CV Tracking: Motion Detected"
+                    vis_frame = PhysicsOverlay.draw_vector(vis_frame, center, vel, "", PhysicsOverlay.COLOR_VELOCITY, scale=3.0)
+                kf['caption'] = f"Motion Tracking (t={kf['timestamp']:.1f}s)"
             
             kf['processed_image'] = vis_frame
             final_keyframes.append(kf)
-            progress_bar.progress((idx + 1) / len(sampled_frames))
 
         status.update(label="✅ Analysis Complete", state="complete", expanded=False)
         
@@ -227,8 +238,7 @@ def render_results(analysis_mode):
                 kf = row_frames[idx]
                 with col:
                     st.image(kf['processed_image'], use_container_width=True, channels="RGB")
-                    # Dynamic caption based on timestamp
-                    st.markdown(f"<div class='caption-text'>t = {kf['timestamp']:.2f}s | {kf.get('caption', '')}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='caption-text'>{kf.get('caption', '')}</div>", unsafe_allow_html=True)
 
     # --- 3. Deep Dive Summary ---
     st.divider()
