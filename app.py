@@ -40,7 +40,7 @@ st.markdown("""
     div[data-testid="stMetricValue"] { font-size: 1.5rem; color: #4facfe; }
     
     /* Gallery Card Styling */
-    .caption-text { color: #b0b0b0; font-size: 0.85rem; margin-top: 8px; font-style: italic; }
+    .caption-text { color: #b0b0b0; font-size: 0.9rem; margin-top: 10px; font-weight: 500; text-align: center; }
     
     /* Hide Default Elements */
     #MainMenu {visibility: hidden;}
@@ -75,9 +75,9 @@ def save_uploaded_file(uploaded_file):
         st.error(f"Error handling file: {e}")
         return None
 
-def extract_and_sample_frames(video_path, num_samples=6):
+def extract_and_sample_frames(video_path, num_samples=3):
     """
-    Extracts frames using CV tracker to find interesting moments.
+    Extracts frames and picks exactly 3 distinct moments: Start, Middle, End.
     """
     # Optimized stride for speed
     generator = get_video_frames_generator(video_path, stride=5, resize_width=400)
@@ -94,11 +94,19 @@ def extract_and_sample_frames(video_path, num_samples=6):
         meta['velocity'] = velocity
         all_frames.append(meta)
         
-    # 2. Sample N keyframes evenly
+    # 2. Sample 3 Keyframes (Start, Middle, End)
     total = len(all_frames)
     if total == 0: return [], []
     
-    indices = np.linspace(0, total - 1, num_samples, dtype=int)
+    # Explicitly pick 0% (Start), 50% (Peak Action), 90% (Result)
+    # We avoid 100% to avoid fade-outs/black screens
+    idx_start = 0
+    idx_mid = total // 2
+    idx_end = int(total * 0.90) 
+    
+    # Ensure indices are unique if video is very short
+    indices = sorted(list(set([idx_start, idx_mid, idx_end])))
+    
     sampled_frames = [all_frames[i] for i in indices]
     
     return sampled_frames, all_frames
@@ -118,7 +126,7 @@ def render_sidebar():
         st.markdown("---")
         show_raw = st.toggle("Show Raw Video Player", value=False)
         
-        st.info("System Ready: Full AI Visualization")
+        st.info("System Ready: High-Speed Mode")
         return mode, show_raw
 
 def render_header():
@@ -126,12 +134,6 @@ def render_header():
     st.markdown('<div class="sub-text">Automated Physics Extraction & Visual Reasoning Engine</div>', unsafe_allow_html=True)
 
 def process_pipeline(tfile_path, api_key, analysis_mode):
-    """
-    Pipeline: 
-    1. Fast CV Scan
-    2. AI Text Summary
-    3. Deep AI Vector Generation for ALL gallery frames
-    """
     try:
         from ai_utils import configure_gemini, analyze_physics_with_gemini, get_physics_overlay_coordinates
         if not configure_gemini(api_key):
@@ -145,7 +147,7 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         
         # 1. Computer Vision Pass
         status.write("📷 Scanning video structure...")
-        sampled_frames, all_frames_context = extract_and_sample_frames(tfile_path)
+        sampled_frames, all_frames_context = extract_and_sample_frames(tfile_path, num_samples=3)
         
         if not sampled_frames:
             status.update(label="❌ Error reading video", state="error")
@@ -158,7 +160,7 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         ai_text_result = analyze_physics_with_gemini(context_subset, analysis_level=analysis_mode)
         
         # 3. Visual Reasoning (The Heavy Lifting)
-        status.write(f"📐 Generative AI: Calculating Force Vectors for {len(sampled_frames)} keyframes...")
+        status.write(f"📐 Calculating Force Vectors for {len(sampled_frames)} keyframes...")
         
         final_keyframes = []
         progress_bar = st.progress(0)
@@ -167,8 +169,7 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         for idx, kf in enumerate(sampled_frames):
             vis_frame = kf['frame'].copy()
             
-            # --- CRITICAL CHANGE: AI CALL FOR EVERY FRAME ---
-            # We treat every gallery frame as a "Hero Frame"
+            # AI Call for High Fidelity Overlay
             coords = get_physics_overlay_coordinates(kf['original_frame_bgr'])
             
             if coords:
@@ -178,14 +179,14 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
                 # Create a smart caption from the vectors found
                 vectors_found = [v.get('name', 'Force') for v in coords.get('vectors', [])]
                 vector_str = ", ".join(vectors_found[:2]) # Top 2 forces
-                kf['caption'] = f"Active Forces: {vector_str}"
+                kf['caption'] = f"Forces: {vector_str}"
             else:
-                # Fallback to CV if AI times out or fails
+                # Fallback to CV if AI times out
                 center = kf.get('center')
                 vel = kf.get('velocity', (0,0))
                 if center:
                     vis_frame = PhysicsOverlay.draw_vector(vis_frame, center, vel, "Motion", PhysicsOverlay.COLOR_VELOCITY, scale=3.0)
-                kf['caption'] = "Motion Tracking (Fallback)"
+                kf['caption'] = "Motion Tracking"
             
             kf['processed_image'] = vis_frame
             final_keyframes.append(kf)
@@ -214,20 +215,22 @@ def render_results(analysis_mode):
     m2.metric("Primary Principle", result.get("physics_principle", "Analysis Pending"))
     m3.metric("Est. Velocity", result.get("velocity_estimation", "Calculating..."))
     
-    # --- 2. Keyframe Gallery ---
+    # --- 2. Keyframe Gallery (3 distinct frames) ---
     st.subheader("🎞️ Physics Timeline")
     
-    # Grid Layout: 2 rows of 3
-    rows = [keyframes[:3], keyframes[3:]]
+    # Single row of 3 images
+    cols = st.columns(3)
     
-    for row_frames in rows:
-        cols = st.columns(3)
-        for idx, col in enumerate(cols):
-            if idx < len(row_frames):
-                kf = row_frames[idx]
-                with col:
-                    st.image(kf['processed_image'], use_container_width=True, channels="RGB")
-                    st.markdown(f"<div class='caption-text'>t={kf['timestamp']:.2f}s | {kf.get('caption', '')}</div>", unsafe_allow_html=True)
+    labels = ["Initial State", "Mid-Motion", "Final State"]
+    
+    for idx, col in enumerate(cols):
+        if idx < len(keyframes):
+            kf = keyframes[idx]
+            label = labels[idx] if idx < 3 else "Keyframe"
+            
+            with col:
+                st.image(kf['processed_image'], use_container_width=True, channels="RGB")
+                st.markdown(f"<div class='caption-text'><strong>{label}</strong> (t={kf['timestamp']:.2f}s)<br>{kf.get('caption', '')}</div>", unsafe_allow_html=True)
 
     # --- 3. Deep Dive Summary ---
     st.divider()
