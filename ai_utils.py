@@ -254,12 +254,10 @@ def get_batch_physics_overlays(frames_bgr_list):
             ]
         """
         
-        # Start the content list with the prompt
         content_payload = [prompt_text]
 
         # 2. Append Images to Payload
         for idx, frame in enumerate(frames_bgr_list):
-            # FIX: Convert BGR (OpenCV) to RGB -> PIL
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pil_img = PIL.Image.fromarray(rgb_frame)
             
@@ -276,7 +274,6 @@ def get_batch_physics_overlays(frames_bgr_list):
         clean_text = _clean_json_response(response.text)
         data = json.loads(clean_text)
         
-        # Handle edge case where AI wraps list in a dict
         if isinstance(data, dict): 
             data = data.get("frames", data.get("data", [data]))
             
@@ -297,12 +294,9 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         if not keyframes:
             return {"error": "No frames to analyze"}
             
-        # Select the middle frame for main context
         mid_idx = len(keyframes) // 2
-        # Note: keyframes coming from app.py usually have 'frame' as RGB numpy array
         ref_frame_rgb = keyframes[mid_idx]['frame']
         
-        # FIX: Ensure it is a PIL Image
         pil_image = PIL.Image.fromarray(ref_frame_rgb)
 
         prompt = f"""
@@ -434,11 +428,12 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
 
         response = model.generate_content(
             [prompt, pil_image],
-            generation_config={"response_mime_type": "application/json"},
-            safety_settings=safety_settings
+            # Removed generation_config to ensure compatibility with older google-generativeai versions
+            safety_settings=safety_settings 
         )
         
-        return json.loads(_clean_json_response(response.text))
+        clean_text = _clean_json_response(response.text)
+        return json.loads(clean_text)
 
     except Exception as e:
         print(f"Analysis Error: {e}")
