@@ -16,6 +16,7 @@ class VisualConfig:
     COLOR_NORMAL: Tuple[int, int, int] = (0, 255, 0)        # Green
     COLOR_FRICTION: Tuple[int, int, int] = (0, 165, 255)    # Orange
     COLOR_PATH: Tuple[int, int, int] = (0, 255, 255)        # Yellow
+    COLOR_DEFAULT: Tuple[int, int, int] = (0, 255, 0)       # Fallback Green
     
     # Text Styling
     COLOR_TEXT: Tuple[int, int, int] = (255, 255, 255)      # White
@@ -40,10 +41,31 @@ class PhysicsOverlay:
 
     @staticmethod
     def _to_point(pt) -> Tuple[int, int]:
-        """Safely converts coordinates to integer pixels."""
+        """Safely converts numpy/float coordinates to integer pixels."""
         if isinstance(pt, np.ndarray):
             pt = pt.flatten()
         return (int(round(pt[0])), int(round(pt[1])))
+
+    @staticmethod
+    def _hex_to_bgr(hex_color: str) -> Tuple[int, int, int]:
+        """Converts '#RRGGBB' string to (B, G, R) tuple for OpenCV."""
+        try:
+            if not isinstance(hex_color, str):
+                return VisualConfig.COLOR_DEFAULT
+            
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) != 6:
+                return VisualConfig.COLOR_DEFAULT
+                
+            # Parse RGB
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            
+            # Return BGR
+            return (b, g, r)
+        except Exception:
+            return VisualConfig.COLOR_DEFAULT
 
     @staticmethod
     def draw_smart_label(frame, text, position, bg_color=None):
@@ -112,7 +134,9 @@ class PhysicsOverlay:
             
         h, w = frame.shape[:2]
         
+        # Helper to convert normalized (0.0-1.0) to pixel coordinates
         def to_pix(coord):
+            if not coord or len(coord) < 2: return (0,0)
             return (int(coord[0] * w), int(coord[1] * h))
         
         # Draw Center of Mass
@@ -129,20 +153,23 @@ class PhysicsOverlay:
                 start = to_pix(vec.get("start", [0,0]))
                 end = to_pix(vec.get("end", [0,0]))
                 
-                # Map color strings to BGR
-                c_map = {
-                    "red": VisualConfig.COLOR_GRAVITY,
-                    "green": VisualConfig.COLOR_VELOCITY,
-                    "blue": VisualConfig.COLOR_NORMAL,
-                    "orange": VisualConfig.COLOR_FRICTION
-                }
-                color = c_map.get(vec.get("color", "green"), VisualConfig.COLOR_VELOCITY)
+                # Handle Color: AI sends Hex, or Name. We prefer Hex now.
+                color_raw = vec.get("color", "green")
+                if isinstance(color_raw, str) and color_raw.startswith("#"):
+                    color = PhysicsOverlay._hex_to_bgr(color_raw)
+                else:
+                    # Fallback for old "name" based colors
+                    c_map = {
+                        "red": VisualConfig.COLOR_GRAVITY,
+                        "green": VisualConfig.COLOR_VELOCITY,
+                        "blue": VisualConfig.COLOR_NORMAL,
+                        "orange": VisualConfig.COLOR_FRICTION
+                    }
+                    color = c_map.get(color_raw, VisualConfig.COLOR_VELOCITY)
                 
-                # Draw the vector using our robust method
-                # We calculate the vector delta manually to reuse draw_vector logic
-                delta = (end[0] - start[0], end[1] - start[1])
-                
-                # We reuse the arrow drawing logic manually here for absolute coords
+                # Draw the vector
+                # Note: We use arrowedLine directly here because we have absolute start/end points
+                # rather than start + velocity_delta
                 cv2.arrowedLine(frame, start, end, color, 4, VisualConfig.AA_MODE, tipLength=0.2)
                 PhysicsOverlay.draw_smart_label(frame, vec.get("name", ""), end, color)
                 

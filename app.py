@@ -11,7 +11,7 @@ import ai_utils
 
 # --- CONFIGURATION & CSS ---
 st.set_page_config(
-    page_title="PhysicsLens: Snapshot Analysis",
+    page_title="PhysicsLens Analysis",
     page_icon="📸",
     layout="wide"
 )
@@ -143,7 +143,9 @@ def main():
         # --- PHASE 1: IMMEDIATE FEEDBACK ---
         # Show raw video immediately so user knows it loaded
         st.caption("📽️ Raw Footage")
-        st.video(tfile.name)
+        c_left, c_center, c_right = st.columns([1, 2, 1])
+        with c_center:
+            st.video(tfile.name)
         
         # --- PHASE 2 & 3: PROCESSING (Only if not done) ---
         if st.session_state.processed_data is None:
