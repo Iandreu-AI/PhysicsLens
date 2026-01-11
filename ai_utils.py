@@ -41,7 +41,7 @@ def get_batch_physics_overlays(frames_bgr_list):
     Uses the 'Universal Physics' prompt.
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-3-pro-preview')
         
         # 1. Prepare Prompt parts
         prompt_text = """
@@ -289,7 +289,7 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
     Uses the 'Vision Engine' prompt.
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-2.5-flash-lite')
         
         if not keyframes:
             return {"error": "No frames to analyze"}
