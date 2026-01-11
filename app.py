@@ -5,9 +5,10 @@ import cv2
 import numpy as np
 
 # --- LOCAL MODULE IMPORTS ---
-# We use the existing utils, but orchestrate them differently
 from overlay_utils import PhysicsOverlay
 import ai_utils 
+from track_utils import MotionTracker
+from video_utils import generate_annotated_video
 
 # --- CONFIGURATION & CSS ---
 st.set_page_config(
@@ -29,12 +30,11 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
         margin-bottom: 1rem;
     }
-    .step-card {
+    .metric-card {
         background-color: #1a1c24;
         padding: 1rem;
-        border-radius: 10px;
-        border: 1px solid #30333d;
-        text-align: center;
+        border-radius: 8px;
+        border-left: 5px solid #4facfe;
     }
     div[data-testid="stImage"] { margin: auto; }
     </style>
@@ -47,6 +47,8 @@ if "processed_data" not in st.session_state:
     st.session_state.processed_data = None
 if "analysis_text" not in st.session_state:
     st.session_state.analysis_text = None
+if "output_video_path" not in st.session_state:
+    st.session_state.output_video_path = None
 
 # --- HELPER FUNCTIONS ---
 
@@ -76,13 +78,13 @@ def extract_three_keyframes(video_path):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if ret:
-            # Convert BGR to RGB immediately
+            # Convert BGR to RGB immediately for display/AI
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             timestamp = frame_idx / fps if fps > 0 else 0
             
             keyframes.append({
-                'frame': frame_rgb, # RGB for AI/Display
-                'frame_bgr': frame, # BGR for OpenCV drawing if needed
+                'frame': frame_rgb,       # RGB for AI/Display
+                'frame_bgr': frame,       # BGR for OpenCV drawing
                 'timestamp': timestamp,
                 'label': labels[idx],
                 'original_idx': idx
@@ -95,6 +97,7 @@ def reset_analysis_state():
     """Clears previous analysis data."""
     st.session_state.processed_data = None
     st.session_state.analysis_text = None
+    st.session_state.output_video_path = None
 
 # --- MAIN UI WORKFLOW ---
 
@@ -107,7 +110,7 @@ def render_sidebar():
             index=1
         )        
         st.divider()
-        st.info("Understand physics concepts behind real-world experiments")
+        st.info("💡 Tip: Ensure the video has a clear moving object against a stable background.")
         return mode
 
 def main():
@@ -118,10 +121,9 @@ def main():
     analysis_level = render_sidebar()
     
     # 3. Secure API Key
-    # Priority: User Input -> Secrets
     api_key = st.secrets.get("GOOGLE_API_KEY")
     if not api_key:
-        st.warning("⚠️ Please enter your Google API Key in the sidebar to proceed.")
+        st.warning("⚠️ Please enter your Google API Key in the sidebar or secrets.toml to proceed.")
         st.stop()
         
     ai_utils.configure_gemini(api_key)
@@ -141,13 +143,12 @@ def main():
         tfile.flush()
         
         # --- PHASE 1: IMMEDIATE FEEDBACK ---
-        # Show raw video immediately so user knows it loaded
         st.caption("📽️ Raw Footage")
         c_left, c_center, c_right = st.columns([1, 2, 1])
         with c_center:
             st.video(tfile.name)
         
-        # --- PHASE 2 & 3: PROCESSING (Only if not done) ---
+        # --- PHASE 2 & 3: PROCESSING ---
         if st.session_state.processed_data is None:
             
             progress_bar = st.progress(0)
@@ -155,51 +156,68 @@ def main():
             
             try:
                 # Step A: Extraction
-                status_text.markdown("**Step 1/3**: Extracting Keyframes (Start, Mid, End)...")
+                status_text.markdown("**Step 1/4**: Extracting Keyframes...")
                 keyframes = extract_three_keyframes(tfile.name)
                 
                 if not keyframes:
                     st.error("Could not extract frames. Video might be corrupt.")
                     st.stop()
                 
-                progress_bar.progress(33)
+                progress_bar.progress(25)
                 
-                # Step B: AI Analysis (Dual Mode)
-                status_text.markdown("**Step 2/3**: Querying Gemini Vision Model (Vector + Concept)...")
-                
-                # B1. Vector Data (Batch)
-                # We need BGR frames for the AI function we wrote earlier, or adapt it.
-                # ai_utils.get_batch_physics_overlays expects BGR list.
+                # Step B: AI Analysis (Snapshot)
+                status_text.markdown("**Step 2/4**: Querying Gemini Vision Model...")
                 bgr_frames = [kf['frame_bgr'] for kf in keyframes]
+                
+                # Get Vector Data (Gravity, Normal Force positions)
                 vector_data = ai_utils.get_batch_physics_overlays(bgr_frames)
                 
-                # B2. Text Explanation (Concept)
-                # ai_utils.analyze_physics_with_gemini expects list of dicts with 'frame' key
+                # Get Text Explanation
                 text_data = ai_utils.analyze_physics_with_gemini(keyframes, analysis_level=analysis_level)
                 
-                progress_bar.progress(66)
+                progress_bar.progress(50)
                 
-                # Step C: Rendering
-                status_text.markdown("**Step 3/3**: Rendering Physics Overlays...")
+                # Step C: Motion Tracking & Rendering (Full Video)
+                status_text.markdown("**Step 3/4**: Rendering High-Performance Overlay...")
+                
+                # We use a distinct file name to ensure Streamlit doesn't cache an old version
+                output_filename = f"tracked_{uploaded_file.name}"
+                output_path = os.path.join(tempfile.gettempdir(), output_filename)
+                
+                # Initialize a fresh tracker
+                tracker = MotionTracker()
+                
+                # Import the new processor
+                from video_utils import generate_annotated_video
+                
+                # EXECUTE PIPELINE
+                # We pass the AI data merely for context (gravity extraction), 
+                # but we do NOT call the API again.
+                success, final_path = generate_annotated_video(tfile.name, output_path, tracker, vector_data)
+        
+
+                if success:
+                    st.session_state.output_video_path = final_path
+                else:
+                    st.error(f"Video rendering failed: {final_path}")
+
+                progress_bar.progress(75)
+
+                # Step D: Rendering Snapshot Gallery
+                status_text.markdown("**Step 4/4**: Finalizing Gallery...")
                 
                 final_images = []
                 for idx, kf in enumerate(keyframes):
-                    # Copy the RGB frame for drawing
-                    # Note: OpenCV drawing functions usually work on BGR, but since we are displaying
-                    # in Streamlit (RGB), let's convert, draw, then display.
-                    # Wait, overlay_utils uses OpenCV functions which expect BGR usually? 
-                    # Let's check overlay_utils.draw_vector. It uses cv2.arrowedLine. 
-                    # If we pass RGB, it draws RGB colors. That works fine as long as consistent.
-                    
                     vis_frame = kf['frame'].copy() 
                     
-                    # Find matching AI data
-                    # ai_utils returns list with 'frame_index'
-                    frame_vectors = next((item for item in vector_data if item.get("frame_index") == idx), None)
-                    
-                    # Fallback if list order matches
-                    if not frame_vectors and idx < len(vector_data):
-                        frame_vectors = vector_data[idx]
+                    # Robust AI Data Matching
+                    frame_vectors = None
+                    # Try to match by index if available
+                    if vector_data and isinstance(vector_data, list):
+                        frame_vectors = next((item for item in vector_data if item.get("frame_index") == idx), None)
+                        # Fallback: just take the i-th element
+                        if not frame_vectors and idx < len(vector_data):
+                            frame_vectors = vector_data[idx]
                         
                     if frame_vectors:
                         vis_frame = PhysicsOverlay.draw_ai_overlay(vis_frame, frame_vectors)
@@ -212,24 +230,23 @@ def main():
                 st.session_state.keyframe_labels = [kf['label'] for kf in keyframes]
                 
                 progress_bar.progress(100)
-                status_text.empty() # Clear status
-                progress_bar.empty() # Clear bar
+                status_text.empty() 
+                progress_bar.empty()
                 
             except Exception as e:
                 st.error(f"Processing Error: {e}")
+                # Print stack trace for debugging
+                import traceback
+                st.code(traceback.format_exc())
                 st.stop()
-            finally:
-                # Cleanup temp file
-                # os.remove(tfile.name) # Keep it for the video player above
-                pass
 
         # --- PHASE 4: VISUALIZATION & PRESENTATION ---
         
+        # 1. Snapshot Gallery
         if st.session_state.processed_data:
             st.divider()
             st.markdown("### 🔬 Snapshot Analysis")
             
-            # Gallery View
             cols = st.columns(3)
             images = st.session_state.processed_data
             labels = st.session_state.keyframe_labels
@@ -238,31 +255,51 @@ def main():
                 with col:
                     st.image(images[i], use_container_width=True, caption=labels[i])
 
-            # Educational Context
+            # 2. Educational Context
             txt_data = st.session_state.analysis_text
             
-            # CHECK FOR ERROR KEY
             if txt_data and not txt_data.get("error"):
                 st.divider()
                 c1, c2 = st.columns([1, 2])
                 
                 with c1:
                     st.markdown("#### 📊 Key Metrics")
-                    st.success(f"**Subject:** {txt_data.get('main_object', 'Object')}")
-                    st.info(f"**Principle:** {txt_data.get('physics_principle', 'Physics')}")
-                    st.warning(f"**Motion:** {txt_data.get('velocity_estimation', 'Analyzed')}")
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <b>Subject:</b> {txt_data.get('main_object', 'Object')}<br>
+                        <b>Principle:</b> {txt_data.get('physics_principle', 'Physics')}<br>
+                        <b>Motion:</b> {txt_data.get('velocity_estimation', 'Analyzed')}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                 with c2:
                     st.markdown(f"#### 🎓 Expert Explanation ({analysis_level})")
-                    st.markdown(f"> {txt_data.get('explanation', 'No explanation available.')}")
+                    st.info(f"{txt_data.get('explanation', 'No explanation available.')}")
             else:
-                # --- NEW DETAILED ERROR MESSAGE ---
                 error_details = txt_data.get("error") if txt_data else "Unknown Data Error"
-                st.error(f"⚠️ Analysis Failed. Debug Details: {error_details}")
-                
-                # Optional: Show what raw data we actually got (for debugging)
-                with st.expander("View Raw Debug Data"):
-                    st.write(txt_data)
+                st.error(f"⚠️ Analysis Text Failed: {error_details}")
+
+            # 3. Full Motion Video
+            st.divider()
+            st.markdown("### 🎥 Full Motion Analysis")
+            st.caption("Real-time tracking.")
+            
+            if st.session_state.output_video_path and os.path.exists(st.session_state.output_video_path):
+                try:
+                    # Fix: Open as binary and read bytes into memory
+                    # This ensures Streamlit receives the actual data, not just a fragile path
+                    with open(st.session_state.output_video_path, 'rb') as video_file:
+                        video_bytes = video_file.read()
+                    
+                    if len(video_bytes) > 0:
+                        st.video(video_bytes, format="video/mp4")
+                    else:
+                        st.error("⚠️ Generated video file is empty.")
+                        
+                except Exception as e:
+                    st.error(f"Error reading video file: {e}")
+            else:
+                st.warning("Video tracking data unavailable.")
 
 if __name__ == "__main__":
     main()

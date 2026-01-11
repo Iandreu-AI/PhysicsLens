@@ -80,6 +80,7 @@ def get_batch_physics_overlays(frames_bgr_list):
             | **Lift** | $F_L$ | Aerodynamic wing/foil active. | $\perp$ to Velocity. | `#E0FF00` |
             | **Thrust** | $F_{{th}}$ | Engine/Propulsion active. | Direction of acceleration. | `#00FF00` |
             | **Magnetic**| $F_B$ | Ferromagnetic interaction visible. | $\perp$ to $v$ and $B$. | `#550000` |
+            | **Velocity**| $F_v$ | Object is moving. | Along the direction of motion. | `#64FFE0` |
  
             
             ## 3. Kinematic Inference Heuristics
@@ -159,7 +160,14 @@ def get_batch_physics_overlays(frames_bgr_list):
                     "start": [0.5000, 0.4000],
                     "end": [0.5000, 0.2000],
                     "color": "#00FFFF"
-                }
+                },
+                {
+                    "name": "Velocity",
+                    "symbol": "F_v",
+                    "formula": "v = ",
+                    "start": [0.5000, 0.4000],
+                    "end": [0.5000, 0.2000],
+                    "color": "#00FFFF"
                 ]
             }
             ]
@@ -268,7 +276,7 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
     Analyzes the video frames to produce the educational text explanation.
     """
     try:
-        model = genai.GenerativeModel('gemini-3-pro-preview')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         if not frames_data:
             return {"error": "No frames to analyze"}

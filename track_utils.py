@@ -1,171 +1,125 @@
-# --- REWRITE FILE: track_utils.py ---
-
 import cv2
 import numpy as np
 
 class MotionTracker:
-    def __init__(self, verification_frames=5):
+    def __init__(self, verification_frames=3):
         """
-        A Hybrid Tracker that uses Background Subtraction to FIND the object,
-        and then switches to a Correlation Filter Tracker (CSRT) to LOCK onto it.
+        A Hybrid Tracker optimized for handheld video.
         
         Args:
-            verification_frames (int): Number of frames the object must be detected
-                                     consistently before locking on.
+            verification_frames (int): lowered to 3 for faster lock-on.
         """
         # --- State Management ---
         self.mode = "DETECT" # Options: "DETECT", "TRACK"
         
-        # --- Detection Tools (For finding the object initially) ---
-        # History=500 means it learns the background quickly. 
-        # VarThreshold=25 is sensitive enough for initial movement.
-        self.detector = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=25, detectShadows=False)
+        # --- Detection Tools ---
+        # History=100 adapts faster to changing backgrounds (handheld camera)
+        self.detector = cv2.createBackgroundSubtractorMOG2(history=100, varThreshold=40, detectShadows=False)
         self.consecutive_detections = 0
         self.potential_bbox = None
         self.verification_limit = verification_frames
         
-        # --- Tracking Tools (For handling camera shake/handheld) ---
+        # --- Tracking Tools ---
         self.tracker = None
-        self.tracker_bbox = None
         
         # --- Physics Data ---
         self.prev_center = None
         self.velocity = (0, 0)
-        # Circular buffer for smooth velocity (last 5 frames)
         self.velocity_buffer = [(0,0)] * 5 
 
     def _create_tracker(self):
-        """
-        Factory to create a robust tracker. 
-        Safely handles missing OpenCV modules by checking availability first.
-        """
-        tracker = None
-        
-        # 1. Try CSRT (Best)
+        """Factory to create a robust tracker."""
         if hasattr(cv2, 'TrackerCSRT_create'):
-            tracker = cv2.TrackerCSRT_create()
-        elif hasattr(cv2, 'legacy') and hasattr(cv2.legacy, 'TrackerCSRT_create'):
-            tracker = cv2.legacy.TrackerCSRT_create()
-            
-        # 2. Try KCF (Fast)
-        elif hasattr(cv2, 'TrackerKCF_create'):
-            tracker = cv2.TrackerKCF_create()
-        elif hasattr(cv2, 'legacy') and hasattr(cv2.legacy, 'TrackerKCF_create'):
-            tracker = cv2.legacy.TrackerKCF_create()
-            
-        # 3. Try MIL (Standard fallback)
-        elif hasattr(cv2, 'TrackerMIL_create'):
-            tracker = cv2.TrackerMIL_create()
-            
-        if tracker is None:
-            print("Warning: No Tracker algorithms found in cv2. Staying in DETECT mode.")
-            return None
-            
-        return tracker
+            return cv2.TrackerCSRT_create()
+        if hasattr(cv2, 'legacy') and hasattr(cv2.legacy, 'TrackerCSRT_create'):
+            return cv2.legacy.TrackerCSRT_create()
+        if hasattr(cv2, 'TrackerKCF_create'):
+            return cv2.TrackerKCF_create()
+        return cv2.TrackerMIL_create()
 
     def _smooth_velocity(self, current_v):
-        """Apply Moving Average to reduce 'jitter' in the arrow."""
+        """Apply Moving Average to reduce 'jitter'."""
         self.velocity_buffer.pop(0)
         self.velocity_buffer.append(current_v)
-        
         avg_x = sum(v[0] for v in self.velocity_buffer) / len(self.velocity_buffer)
         avg_y = sum(v[1] for v in self.velocity_buffer) / len(self.velocity_buffer)
         return (avg_x, avg_y)
 
     def process_frame(self, frame):
         """
-        Main pipeline processing.
         Returns: center (x, y), velocity (vx, vy)
         """
         h, w = frame.shape[:2]
         center = None
         
         # ==========================================================
-        # MODE A: DETECTION (Look for movement)
+        # MODE A: DETECTION
         # ==========================================================
         if self.mode == "DETECT":
-            # 1. Preprocess
-            blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+            # 1. Aggressive Preprocess (Blur more to ignore camera grain)
+            blurred = cv2.GaussianBlur(frame, (21, 21), 0)
             mask = self.detector.apply(blurred)
             
-            # 2. Denoise mask
+            # 2. Clean Mask
+            _, mask = cv2.threshold(mask, 250, 255, cv2.THRESH_BINARY)
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel)
             
             # 3. Find Contours
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if contours:
-                # Get largest moving object
                 largest = max(contours, key=cv2.contourArea)
                 area = cv2.contourArea(largest)
                 
-                # Filter: Must be significant size, but not THE WHOLE SCREEN
-                # (Whole screen movement = Camera Panning, we want to ignore that during detection)
-                if 500 < area < (w * h * 0.6):
+                # Broad size filter
+                if 200 < area < (w * h * 0.8):
                     x, y, bw, bh = cv2.boundingRect(largest)
                     self.potential_bbox = (x, y, bw, bh)
                     self.consecutive_detections += 1
+                    
+                    # Return center IMMEDIATELY so user sees blue box
+                    center = (int(x + bw/2), int(y + bh/2))
                 else:
-                    self.consecutive_detections = 0
-            else:
-                self.consecutive_detections = 0
+                    self.consecutive_detections = max(0, self.consecutive_detections - 1)
             
-            # 4. Check if we are ready to LOCK ON
+            # 4. Lock On Logic
             if self.consecutive_detections >= self.verification_limit:
                 print(">>> Object Locked. Switching to Tracker.")
-                
-                # Try to create tracker
-                possible_tracker = self._create_tracker()
-                
-                if possible_tracker:
-                    self.mode = "TRACK"
-                    self.tracker = possible_tracker
+                self.tracker = self._create_tracker()
+                if self.tracker:
                     self.tracker.init(frame, self.potential_bbox)
-                    
-                    # Set initial center
-                    bx, by, bw, bh = self.potential_bbox
-                    center = (int(bx + bw/2), int(by + bh/2))
-                else:
-                    # Fallback: Keep detecting if no tracker available
-                    # We just accept the current detection as the center
-                    bx, by, bw, bh = self.potential_bbox
-                    center = (int(bx + bw/2), int(by + bh/2))
-                    self.mode = "DETECT" # Force stay in detect mode
+                    self.mode = "TRACK"
 
         # ==========================================================
-        # MODE B: TRACKING (Handle Handheld/Shake)
+        # MODE B: TRACKING
         # ==========================================================
         elif self.mode == "TRACK":
             success, bbox = self.tracker.update(frame)
-            
             if success:
-                self.tracker_bbox = bbox
                 bx, by, bw, bh = [int(v) for v in bbox]
                 center = (int(bx + bw/2), int(by + bh/2))
-                
-                # Draw Box for Debugging (Optional, can be removed for production)
-                # cv2.rectangle(frame, (bx, by), (bx+bw, by+bh), (0, 255, 0), 2)
             else:
-                # Tracking lost (object left frame or moved too fast)
-                print(">>> Tracking Lost. Resetting to Detection.")
+                print(">>> Tracking Lost. Resetting.")
                 self.mode = "DETECT"
                 self.consecutive_detections = 0
-                self.detector = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=25, detectShadows=False)
-
+                # Don't reset detector immediately, just mode
+        
         # ==========================================================
-        # PHYSICS CALCULATION
+        # PHYSICS
         # ==========================================================
         if center and self.prev_center:
-            # Calculate raw velocity (pixels per frame)
             raw_vx = center[0] - self.prev_center[0]
             raw_vy = center[1] - self.prev_center[1]
-            
-            # Apply smoothing
             self.velocity = self._smooth_velocity((raw_vx, raw_vy))
-        else:
-            # Decay velocity if object stops/lost
-            self.velocity = (self.velocity[0] * 0.8, self.velocity[1] * 0.8)
+        
+        # Decay if lost
+        if not center:
+             self.velocity = (self.velocity[0] * 0.9, self.velocity[1] * 0.9)
+             # Prevent flickering by holding last position briefly?
+             if self.prev_center:
+                 center = self.prev_center
 
         if center:
             self.prev_center = center

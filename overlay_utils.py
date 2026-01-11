@@ -35,9 +35,11 @@ class PhysicsOverlay:
     Combines high-fidelity drawing with the app's specific logic.
     """
     
-    # Mapping for app.py compatibility
+    # --- EXPOSED CONSTANTS FOR VIDEO_UTILS ---
     COLOR_VELOCITY = VisualConfig.COLOR_VELOCITY
-    COLOR_FORCE = VisualConfig.COLOR_GRAVITY
+    COLOR_GRAVITY = VisualConfig.COLOR_GRAVITY    # <--- Fixed: Added this
+    COLOR_FRICTION = VisualConfig.COLOR_FRICTION  # <--- Fixed: Added this
+    COLOR_FORCE = VisualConfig.COLOR_GRAVITY      # Alias
 
     @staticmethod
     def _to_point(pt) -> Tuple[int, int]:
