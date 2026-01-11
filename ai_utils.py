@@ -3,7 +3,10 @@ import PIL.Image
 import json
 import cv2
 import numpy as np
+import re
 import time
+
+# --- CONFIGURATION ---
 
 def configure_gemini(api_key):
     """Configures the Gemini API."""
@@ -21,18 +24,27 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
 
+def _clean_json_response(text):
+    """Helper to strip markdown formatting from Gemini JSON responses."""
+    text = text.strip()
+    # Remove ```json and ``` markers
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\n", "", text)
+        text = re.sub(r"\n```$", "", text)
+    return text
+
+# --- CORE FUNCTIONS ---
+
 def get_batch_physics_overlays(frames_bgr_list):
     """
-    Analyzes multiple frames in a single API call to ensure 
-    temporal consistency and reduce latency.
+    Sends frames to Gemini to get vector coordinates for gravity/normal force.
+    Uses the 'Universal Physics' prompt.
     """
     try:
-        # Using Flash for high-speed vision processing
-        model = genai.GenerativeModel('gemini-3-pro-preview') 
+        model = genai.GenerativeModel('gemini-1.5-pro')
         
-        # 1. Prepare the Prompt
-        prompt_parts = [
-            """
+        # 1. Prepare Prompt parts
+        prompt_text = """
             # System Role: Universal Physics & Kinematics Engine
 
             ## 1. Core Identity & Mission
@@ -107,30 +119,30 @@ def get_batch_physics_overlays(frames_bgr_list):
             **Model Output:**
             ```json
             [
-            {
+            {{
                 "frame_index": 0,
                 "object_name": "Stationary Textbook",
                 "object_center": [0.5000, 0.6000],
                 "state_of_motion": "Static",
                 "vectors": [
-                {
+                {{
                     "name": "Gravity",
                     "symbol": "F_g",
                     "formula": "mg",
                     "start": [0.5000, 0.6000],
                     "end": [0.5000, 0.8000],
                     "color": "#FF2D2D"
-                },
-                {
+                }},
+                {{
                     "name": "Normal Force",
                     "symbol": "F_N",
                     "formula": "mg",
                     "start": [0.5000, 0.6000],
                     "end": [0.5000, 0.4000],
                     "color": "#FFFF2D"
-                }
+                }}
                 ]
-            }
+            }}
             ]
             ```
 
@@ -153,15 +165,15 @@ def get_batch_physics_overlays(frames_bgr_list):
                     "end": [0.5000, 0.6000],
                     "color": "#FF2D2D"
                 },
-                {
+                {{
                     "name": "Drag (Air Resistance)",
                     "symbol": "F_d",
                     "formula": "0.5\\rho v^2 C_d A",
                     "start": [0.5000, 0.4000],
                     "end": [0.5000, 0.2000],
                     "color": "#00FFFF"
-                },
-                {
+                }},
+                {{
                     "name": "Velocity",
                     "symbol": "F_v",
                     "formula": "v = ",
@@ -169,7 +181,7 @@ def get_batch_physics_overlays(frames_bgr_list):
                     "end": [0.5000, 0.2000],
                     "color": "#00FFFF"
                 ]
-            }
+            }}
             ]
             ```
 
@@ -240,26 +252,29 @@ def get_batch_physics_overlays(frames_bgr_list):
                 Coordinates: 0.0-1.0 normalized
             }}
             ]
-            """
-        ]
+        """
+        
+        # Start the content list with the prompt
+        content_payload = [prompt_text]
 
-        # 2. Append Images to Prompt
+        # 2. Append Images to Payload
         for idx, frame in enumerate(frames_bgr_list):
-            # Convert BGR (OpenCV) to RGB (PIL)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = PIL.Image.fromarray(rgb)
+            # FIX: Convert BGR (OpenCV) to RGB -> PIL
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = PIL.Image.fromarray(rgb_frame)
             
-            prompt_parts.append(f"--- Frame Index {idx} ---")
-            prompt_parts.append(pil_img)
+            content_payload.append(f"--- Frame Index {idx} ---")
+            content_payload.append(pil_img)
 
         # 3. Fire Single API Call
-        response = model.generate_content(prompt_parts)
+        response = model.generate_content(
+            content_payload,
+            safety_settings=safety_settings
+        )
         
         # 4. Parse Response
-        text = response.text
-        text = text.replace("```json", "").replace("```", "").strip()
-        
-        data = json.loads(text)
+        clean_text = _clean_json_response(response.text)
+        data = json.loads(clean_text)
         
         # Handle edge case where AI wraps list in a dict
         if isinstance(data, dict): 
@@ -271,20 +286,24 @@ def get_batch_physics_overlays(frames_bgr_list):
         print(f"Batch Overlay Error: {e}")
         return []
 
-def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics"):
+def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics"):
     """
     Analyzes the video frames to produce the educational text explanation.
+    Uses the 'Vision Engine' prompt.
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-pro')
         
-        if not frames_data:
+        if not keyframes:
             return {"error": "No frames to analyze"}
             
         # Select the middle frame for main context
-        mid_idx = len(frames_data) // 2
-        ref_frame = frames_data[mid_idx]['frame'] # Already RGB
-        pil_image = PIL.Image.fromarray(ref_frame)
+        mid_idx = len(keyframes) // 2
+        # Note: keyframes coming from app.py usually have 'frame' as RGB numpy array
+        ref_frame_rgb = keyframes[mid_idx]['frame']
+        
+        # FIX: Ensure it is a PIL Image
+        pil_image = PIL.Image.fromarray(ref_frame_rgb)
 
         prompt = f"""
         # Role
@@ -416,10 +435,10 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
         response = model.generate_content(
             [prompt, pil_image],
             generation_config={"response_mime_type": "application/json"},
-            safety_settings=safety_settings  # <--- APPLIED HERE
+            safety_settings=safety_settings
         )
         
-        return json.loads(response.text)
+        return json.loads(_clean_json_response(response.text))
 
     except Exception as e:
         print(f"Analysis Error: {e}")
