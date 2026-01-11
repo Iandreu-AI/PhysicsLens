@@ -37,17 +37,31 @@ class MotionTracker:
     def _create_tracker(self):
         """
         Factory to create a robust tracker. 
-        Tries CSRT (Best accuracy), falls back to KCF (Fastest), then MIL.
+        Safely handles missing OpenCV modules by checking availability first.
         """
-        # OpenCV 4.x+ API handling
+        tracker = None
+        
+        # 1. Try CSRT (Best)
         if hasattr(cv2, 'TrackerCSRT_create'):
-            return cv2.TrackerCSRT_create()
-        elif hasattr(cv2, 'legacy'):
-            return cv2.legacy.TrackerCSRT_create()
-        else:
-            # Fallback for older OpenCV versions or specific builds
-            print("Warning: CSRT Tracker not found, falling back to KCF.")
-            return cv2.TrackerKCF_create()
+            tracker = cv2.TrackerCSRT_create()
+        elif hasattr(cv2, 'legacy') and hasattr(cv2.legacy, 'TrackerCSRT_create'):
+            tracker = cv2.legacy.TrackerCSRT_create()
+            
+        # 2. Try KCF (Fast)
+        elif hasattr(cv2, 'TrackerKCF_create'):
+            tracker = cv2.TrackerKCF_create()
+        elif hasattr(cv2, 'legacy') and hasattr(cv2.legacy, 'TrackerKCF_create'):
+            tracker = cv2.legacy.TrackerKCF_create()
+            
+        # 3. Try MIL (Standard fallback)
+        elif hasattr(cv2, 'TrackerMIL_create'):
+            tracker = cv2.TrackerMIL_create()
+            
+        if tracker is None:
+            print("Warning: No Tracker algorithms found in cv2. Staying in DETECT mode.")
+            return None
+            
+        return tracker
 
     def _smooth_velocity(self, current_v):
         """Apply Moving Average to reduce 'jitter' in the arrow."""
@@ -100,13 +114,24 @@ class MotionTracker:
             # 4. Check if we are ready to LOCK ON
             if self.consecutive_detections >= self.verification_limit:
                 print(">>> Object Locked. Switching to Tracker.")
-                self.mode = "TRACK"
-                self.tracker = self._create_tracker()
-                self.tracker.init(frame, self.potential_bbox)
                 
-                # Set initial center
-                bx, by, bw, bh = self.potential_bbox
-                center = (int(bx + bw/2), int(by + bh/2))
+                # Try to create tracker
+                possible_tracker = self._create_tracker()
+                
+                if possible_tracker:
+                    self.mode = "TRACK"
+                    self.tracker = possible_tracker
+                    self.tracker.init(frame, self.potential_bbox)
+                    
+                    # Set initial center
+                    bx, by, bw, bh = self.potential_bbox
+                    center = (int(bx + bw/2), int(by + bh/2))
+                else:
+                    # Fallback: Keep detecting if no tracker available
+                    # We just accept the current detection as the center
+                    bx, by, bw, bh = self.potential_bbox
+                    center = (int(bx + bw/2), int(by + bh/2))
+                    self.mode = "DETECT" # Force stay in detect mode
 
         # ==========================================================
         # MODE B: TRACKING (Handle Handheld/Shake)
