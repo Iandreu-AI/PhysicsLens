@@ -121,7 +121,16 @@ def main():
     analysis_level = render_sidebar()
     
     # 3. Secure API Key
+    # Try to load from secrets first
     api_key = st.secrets.get("GOOGLE_API_KEY")
+    
+    # If not in secrets, ask the user in the sidebar
+    if not api_key:
+        with st.sidebar:
+            st.divider()
+            api_key = st.text_input("🔑 Google API Key", type="password", help="Get one at aistudio.google.com")
+    
+    # If we still don't have a key, stop.
     if not api_key:
         st.warning("⚠️ Please enter your Google API Key in the sidebar or secrets.toml to proceed.")
         st.stop()
