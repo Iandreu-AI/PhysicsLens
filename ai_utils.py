@@ -21,7 +21,7 @@ def get_batch_physics_overlays(frames_bgr_list):
     """
     try:
         # Using Flash for high-speed vision processing
-        model = genai.GenerativeModel('gemini-2.0-flash-exp') 
+        model = genai.GenerativeModel('gemini-3-pro-preview') 
         
         # 1. Prepare the Prompt
         prompt_parts = [
@@ -149,7 +149,7 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
     Analyzes the video frames to produce the educational text explanation.
     """
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-3-pro-preview')
         
         if not frames_data:
             return {"error": "No frames to analyze"}
