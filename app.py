@@ -296,9 +296,11 @@ def main():
                         video_bytes = video_file.read()
                     
                     if len(video_bytes) > 0:
-                        st.video(video_bytes, format="video/mp4")
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        with col2:
+                            st.video(video_bytes, format="video/mp4")
                     else:
-                        st.error("⚠️ Generated video file is empty.")
+                        st.error("Video file is empty.")
                         
                 except Exception as e:
                     st.error(f"Error reading video file: {e}")
