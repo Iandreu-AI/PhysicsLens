@@ -14,6 +14,13 @@ def configure_gemini(api_key):
         print(f"Configuration Error: {e}")
         return False
 
+safety_settings = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
+
 def get_batch_physics_overlays(frames_bgr_list):
     """
     Analyzes multiple frames in a single API call to ensure 
@@ -398,12 +405,13 @@ def analyze_physics_with_gemini(frames_data, analysis_level="High School Physics
         }}
         """
 
-        response = model.generate_content([prompt, pil_image])
+        response = model.generate_content(
+            [prompt, pil_image],
+            generation_config={"response_mime_type": "application/json"},
+            safety_settings=safety_settings  # <--- APPLIED HERE
+        )
         
-        text = response.text
-        text = text.replace("```json", "").replace("```", "").strip()
-        
-        return json.loads(text)
+        return json.loads(response.text)
 
     except Exception as e:
         print(f"Analysis Error: {e}")

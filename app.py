@@ -241,6 +241,7 @@ def main():
             # Educational Context
             txt_data = st.session_state.analysis_text
             
+            # CHECK FOR ERROR KEY
             if txt_data and not txt_data.get("error"):
                 st.divider()
                 c1, c2 = st.columns([1, 2])
@@ -255,7 +256,13 @@ def main():
                     st.markdown(f"#### 🎓 Expert Explanation ({analysis_level})")
                     st.markdown(f"> {txt_data.get('explanation', 'No explanation available.')}")
             else:
-                st.error("Could not generate text explanation.")
+                # --- NEW DETAILED ERROR MESSAGE ---
+                error_details = txt_data.get("error") if txt_data else "Unknown Data Error"
+                st.error(f"⚠️ Analysis Failed. Debug Details: {error_details}")
+                
+                # Optional: Show what raw data we actually got (for debugging)
+                with st.expander("View Raw Debug Data"):
+                    st.write(txt_data)
 
 if __name__ == "__main__":
     main()
