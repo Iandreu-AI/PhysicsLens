@@ -105,12 +105,10 @@ def render_sidebar():
             "Education Level",
             ["ELI5 (Basic)", "High School Physics", "Undergrad (Advanced)", "PhD (Quantum/Relativity)"],
             index=1
-        )
-        api_key = st.text_input("Google API Key", type="password")
-        
+        )        
         st.divider()
-        st.info("📸 **Snapshot Mode Active**\n\nOptimized for low latency. Analyzes 3 distinct moments instead of full video.")
-        return mode, api_key
+        st.info("Understand physics concepts behind real-world experiments")
+        return mode
 
 def main():
     # 1. Header
