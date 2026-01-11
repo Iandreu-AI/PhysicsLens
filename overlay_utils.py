@@ -88,6 +88,19 @@ class PhysicsOverlay:
             PhysicsOverlay.draw_smart_label(frame, label, (p2[0]+10, p2[1]), color)
             
         return frame
+    
+    @staticmethod
+    def draw_hud(frame, data: dict):
+        """
+        Draws a Heads-Up Display (HUD) with statistics in the top-left corner.
+        """
+        x, y = 20, 30  # Starting position
+        for key, value in data.items():
+            text = f"{key}: {value}"
+            # Reuse our smart label function for outline/contrast
+            PhysicsOverlay.draw_smart_label(frame, text, (x, y))
+            y += 25  # Move down for next line
+        return frame
 
     @staticmethod
     def draw_ai_overlay(frame, ai_data):
