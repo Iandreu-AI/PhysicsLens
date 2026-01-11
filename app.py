@@ -115,11 +115,11 @@ def main():
     st.markdown('<div class="main-header">PhysicsLens: Snapshot Engine</div>', unsafe_allow_html=True)
     
     # 2. Config
-    analysis_level, user_api_key = render_sidebar()
+    analysis_level = render_sidebar()
     
     # 3. Secure API Key
     # Priority: User Input -> Secrets
-    api_key = user_api_key or st.secrets.get("GOOGLE_API_KEY")
+    api_key = st.secrets.get("GOOGLE_API_KEY")
     if not api_key:
         st.warning("⚠️ Please enter your Google API Key in the sidebar to proceed.")
         st.stop()
