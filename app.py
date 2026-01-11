@@ -6,6 +6,7 @@ import numpy as np
 import time
 
 # --- LOCAL MODULE IMPORTS ---
+from ai_utils import get_batch_physics_overlays
 from video_utils import get_video_frames_generator
 from overlay_utils import PhysicsOverlay
 from track_utils import MotionTracker 
