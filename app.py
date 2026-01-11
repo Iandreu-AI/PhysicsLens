@@ -237,38 +237,64 @@ def process_pipeline(tfile_path, api_key, analysis_mode):
         st.session_state.keyframes = final_keyframes
         st.session_state.processing_complete = True
 
-def render_results(analysis_mode):
+def render_results(analysis_mode, tfile_path):
+    """
+    Updated render function that handles full video generation and playback.
+    """
     result = st.session_state.analysis_results
-    keyframes = st.session_state.keyframes
     
-    if not result:
-        st.error("No results found. Please re-analyze.")
-        return
-
+    # 1. Metrics Row
     st.divider()
     m1, m2, m3 = st.columns(3)
-    m1.metric("Object Detected", result.get("main_object", "Unknown"))
-    m2.metric("Primary Principle", result.get("physics_principle", "Analysis Pending"))
-    m3.metric("Est. Velocity", result.get("velocity_estimation", "Calculating..."))
+    if result:
+        m1.metric("Object", result.get("main_object", "Detected Object"))
+        m2.metric("Principle", result.get("physics_principle", "Dynamics"))
+        m3.metric("State", "Analysis Complete")
     
-    st.subheader("🎞️ Physics Timeline")
-    cols = st.columns(3)
-    labels = ["Initial State", "Mid-Motion", "Final State"]
+    # 2. The Video Player (The Hero Component)
+    st.subheader("▶️ Analysis Replay")
     
-    for idx, col in enumerate(cols):
-        if idx < len(keyframes):
-            kf = keyframes[idx]
-            label = labels[idx] if idx < 3 else "Keyframe"
-            with col:
-                st.image(kf['processed_image'], use_container_width=True, channels="RGB")
-                st.markdown(f"<div class='caption-text'><strong>{label}</strong> (t={kf['timestamp']:.2f}s)<br>{kf.get('caption', '')}</div>", unsafe_allow_html=True)
+    # Define output path
+    output_video_path = tfile_path.replace(".mp4", "_processed.mp4")
+    
+    # Check if we need to generate (or if it's already cached)
+    if not os.path.exists(output_video_path):
+        with st.spinner("Rendering final physics engine output..."):
+            from track_utils import MotionTracker
+            from video_utils import generate_annotated_video
+            
+            # New tracker instance for the clean render pass
+            render_tracker = MotionTracker()
+            
+            # Use the AI data we stored in session state to inform the renderer
+            # (In a full app, we pass the specific batch_coords here)
+            ai_context = st.session_state.get('batch_coords', [])
+            
+            success = generate_annotated_video(tfile_path, output_video_path, render_tracker, ai_context)
+            
+            if not success:
+                st.error("Failed to render video.")
+                return
 
+    # 3. Display Video & Download Button
+    if os.path.exists(output_video_path):
+        # Display the video
+        st.video(output_video_path)
+        
+        # Read file for download button
+        with open(output_video_path, "rb") as file:
+            btn = st.download_button(
+                label="📥 Download Analysis (.mp4)",
+                data=file,
+                file_name="PhysicsLens_Analysis.mp4",
+                mime="video/mp4"
+            )
+    
+    # 4. The Explanation (Below the video)
     st.divider()
-    st.subheader(f"📝 Expert Analysis ({analysis_mode})")
-    if result.get("error"):
-        st.error(f"Analysis Error: {result.get('explanation')}")
-    else:
-        st.info(result.get("explanation"))
+    st.subheader(f"📝 Expert Commentary ({analysis_mode})")
+    if result:
+        st.info(result.get("explanation", "Analysis available."))
 
 # --- MAIN EXECUTION ---
 def main():
