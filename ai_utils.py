@@ -375,7 +375,7 @@ def get_batch_physics_overlays(frames_bgr_list):
         
         # 4. Parse Response
         clean_text = _clean_json_response(response.text)
-        data = json.loads(clean_text)
+        data = _robust_json_load(clean_text)
         
         if isinstance(data, dict): 
             data = data.get("frames", data.get("data", [data]))
@@ -649,7 +649,7 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         3. **Generate complete LaTeX** — all governing equations
         4. **Adapt to audience** — Child ≠ Student ≠ Expert
         5. **Ground in visual evidence** — connect claims to observations
-        6. **LaTeX escaping** — use `\\\\frac` not `\\frac` in JSON
+        6. **LaTeX escaping** — use `\\frac` not `\\frac` in JSON
         7. **Valid JSON** — no trailing commas, proper quotes
 
         **Return raw JSON only. No markdown fences. No preamble.**
@@ -662,7 +662,7 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         )
         
         clean_text = _clean_json_response(response.text)
-        return json.loads(clean_text)
+        return _robust_json_load(clean_text)
 
     except Exception as e:
         print(f"Analysis Error: {e}")
