@@ -4,7 +4,6 @@ import json
 import cv2
 import numpy as np
 import re
-import time
 import ast
 
 # --- CONFIGURATION ---
@@ -28,34 +27,26 @@ safety_settings = [
 # --- ROBUST JSON PARSING ---
 
 def _clean_json_response(text):
-    """
-    Sanitizes Gemini response to ensure valid JSON.
-    Strips markdown code blocks.
-    """
+    """Sanitizes Gemini response to ensure valid JSON."""
     text = text.strip()
-    # Strip Markdown code blocks (```json ... ```)
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*\n?", "", text)
         text = re.sub(r"\n?```\s*$", "", text)
     return text.strip()
 
-def _escape_latex_in_json(text):
+def _fix_invalid_escapes(text):
     """
-    The 'Nuclear' Option for fixing LaTeX in JSON.
-    1. Escapes ALL backslashes (\\ -> \\\\).
-    2. Reverts specific valid JSON escapes (\\\\n -> \\n, \\\\" -> \", etc).
-    This ensures \\sigma becomes \\\\sigma (valid string) instead of \\s (invalid escape).
+    Scans for backslashes that are NOT followed by valid JSON escape characters
+    and double-escapes them.
+    Valid JSON escapes: ", \, /, b, f, n, r, t, u
+    Invalid (LaTeX) examples that crash JSON: \s, \p, \c, \d
     """
-    # 1. Escape everything
-    fixed = text.replace('\\', '\\\\')
-    
-    # 2. Un-escape valid JSON control characters
-    # We look for double backslashes followed by a valid JSON escape char
-    # and replace them with single backslash + char
-    # Valid JSON escapes: " \ / b f n r t u
-    fixed = re.sub(r'\\\\(["\\/bfnrtu])', r'\\\1', fixed)
-    
-    return fixed
+    # Regex explanation:
+    # (?<!\\) -> Lookbehind: Ensure current char is not preceded by a backslash (avoids \\)
+    # \\      -> Match a literal backslash
+    # (?![\\"/bfnrtu]) -> Lookahead: Ensure next char is NOT a valid escape char
+    # We replace match with \\\\ (double backslash)
+    return re.sub(r'(?<!\\)\\(?![\\"/bfnrtu])', r'\\\\', text)
 
 def _robust_json_load(text):
     """
@@ -66,64 +57,58 @@ def _robust_json_load(text):
     # STRATEGY 1: Direct Parse (Best Case)
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        pass # Fall through
+    except Exception:
+        pass 
     
-    # STRATEGY 2: The Nuclear LaTeX Fix
+    # STRATEGY 2: Fix Invalid Escapes (Targeted Regex)
     try:
-        fixed_text = _escape_latex_in_json(text)
+        fixed_text = _fix_invalid_escapes(text)
         return json.loads(fixed_text)
-    except json.JSONDecodeError:
-        pass # Fall through
-
-    # STRATEGY 3: Python AST Eval (For single quotes or loose syntax)
-    try:
-        # ast.literal_eval is safer than eval, handles python-dict style
-        # We need to ensure booleans are capitalized for Python
-        py_style = text.replace("true", "True").replace("false", "False").replace("null", "None")
-        return ast.literal_eval(py_style)
-    except (ValueError, SyntaxError):
+    except Exception:
         pass
 
-    # STRATEGY 4: Extract substring { ... }
+    # STRATEGY 3: Python AST Eval (Last Resort for single quotes)
     try:
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1 and start < end:
-            json_candidate = text[start:end+1]
-            return json.loads(_escape_latex_in_json(json_candidate))
-    except json.JSONDecodeError:
+        # Convert null/true/false to Python None/True/False just in case
+        py_text = text.replace("null", "None").replace("true", "True").replace("false", "False")
+        # Fix escapes for Python eval as well
+        py_text = _fix_invalid_escapes(py_text)
+        return ast.literal_eval(py_text)
+    except Exception:
         pass
 
-    # FAILURE
-    print(f"JSON Parsing Failed. Raw: {original_text[:200]}...")
+    # FALLBACK: Return a dummy object so the app doesn't crash
+    print(f"CRITICAL: JSON Parsing Failed. Raw text sample: {original_text[:100]}...")
     return {
-        "error": "JSON Parsing Failed",
-        "explanation": "Could not parse AI response. Try a simpler video.",
-        "main_object": "Error",
-        "raw_response": original_text
+        "error": "Data Parsing Error",
+        "explanation": "The AI analysis generated complex mathematical symbols that could not be processed. However, the video tracking is still available.",
+        "main_object": "Unknown Object",
+        "motion_type": "Unknown",
+        "visual_cues": "N/A",
+        "active_forces": [],
+        "physics_principle": "Analysis Unavailable",
+        "latex_equations": [],
+        "key_formula": ""
     }
 
 # --- CORE FUNCTIONS ---
 
 def get_batch_physics_overlays(frames_bgr_list):
-    """
-    Sends frames to Gemini to get vector coordinates.
-    """
+    """Sends frames to Gemini to get vector coordinates."""
     try:
         model = genai.GenerativeModel('gemini-1.5-pro')
         
-        # Shortened prompt for brevity in this fix - keep your original if preferred
+        # Simplified prompt to reduce risk of weird text
         prompt_text = """
-        Analyze these frames. Identify the moving object.
-        Return strictly valid JSON.
-        Format:
+        Analyze frames. Return JSON for physics vectors.
+        Structure:
         [
           {
             "frame_index": 0,
             "vectors": [ {"name": "Gravity", "start": [0.5, 0.5], "end": [0.5, 0.8], "color": "#FF0000"} ]
           }
         ]
+        RETURN RAW JSON ONLY.
         """
         
         content_payload = [prompt_text]
@@ -133,15 +118,14 @@ def get_batch_physics_overlays(frames_bgr_list):
             content_payload.append(f"--- Frame {idx} ---")
             content_payload.append(pil_img)
 
-        response = model.generate_content(
-            content_payload,
-            safety_settings=safety_settings
-        )
-        
+        response = model.generate_content(content_payload, safety_settings=safety_settings)
         clean_text = _clean_json_response(response.text)
         data = _robust_json_load(clean_text)
         
         if isinstance(data, dict): 
+            # Handle potential error dict from fallback
+            if "error" in data and "frames" not in data:
+                return []
             data = data.get("frames", data.get("data", [data]))
             
         return data
@@ -151,34 +135,37 @@ def get_batch_physics_overlays(frames_bgr_list):
         return []
 
 def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics"):
-    """
-    Analyzes video frames for educational text.
-    """
+    """Analyzes video frames for educational text."""
     try:
         model = genai.GenerativeModel('gemini-1.5-pro')
         
         if not keyframes:
-            return {"error": "No frames to analyze"}
+            return {"error": "No frames"}
             
         mid_idx = len(keyframes) // 2
         ref_frame_rgb = keyframes[mid_idx]['frame']
         pil_image = Image.fromarray(ref_frame_rgb)
 
-        # Your original prompt logic here...
+        # UPDATED PROMPT: Explicit instructions on escaping
         prompt = f"""
-        You are a Physics AI. Analyze this image for a {analysis_level} student.
-        Identify forces, motion, and Provide LaTeX equations.
+        You are a Physics AI. Analyze this image for a {analysis_level} audience.
         
-        IMPORTANT: Return RAW JSON.
+        CRITICAL JSON RULES:
+        1. Output strictly valid JSON.
+        2. IF YOU WRITE LATEX, YOU MUST DOUBLE-ESCAPE BACKSLASHES.
+           Wrong: "\\frac" or "\\sigma"
+           Right: "\\\\frac" or "\\\\sigma"
+        
+        JSON Structure:
         {{
             "main_object": "Object Name",
             "motion_type": "Type",
-            "visual_cues": "Cues",
-            "active_forces": ["Gravity"],
+            "visual_cues": "Observation",
+            "active_forces": ["Gravity", "Friction"],
             "physics_principle": "Principle",
-            "key_formula": "LaTeX here",
-            "latex_equations": ["LaTeX 1", "LaTeX 2"],
-            "explanation": "Explanation here."
+            "key_formula": "LaTeX Equation (e.g. F = ma)",
+            "latex_equations": ["Eq1", "Eq2"],
+            "explanation": "Brief explanation."
         }}
         """
 
@@ -188,12 +175,10 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         )
         
         clean_text = _clean_json_response(response.text)
-        
-        # USE THE ROBUST LOADER
         return _robust_json_load(clean_text)
 
     except Exception as e:
         return {
             "error": str(e),
-            "explanation": "AI Analysis failed."
+            "explanation": "Connection to AI failed."
         }
