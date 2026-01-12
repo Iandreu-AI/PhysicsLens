@@ -160,7 +160,7 @@ def main():
             
             try:
                 # Step A: Extraction
-                status_text.markdown("**Step 1/4**: Extracting Keyframes...")
+                status_text.markdown("**Step 1**: Extracting Keyframes...")
                 keyframes = extract_three_keyframes(tfile.name)
                 
                 if not keyframes:
@@ -170,7 +170,7 @@ def main():
                 progress_bar.progress(25)
                 
                 # Step B: AI Analysis (Snapshot)
-                status_text.markdown("**Step 2/4**: Querying Gemini Vision Model...")
+                status_text.markdown("**Step 2**: Querying Gemini Vision Model...")
                 bgr_frames = [kf['frame_bgr'] for kf in keyframes]
                 
                 # Get Vector Data (Gravity, Normal Force positions)
@@ -182,7 +182,7 @@ def main():
                 progress_bar.progress(50)
                 
                 # Step C: Motion Tracking & Rendering (Full Video)
-                status_text.markdown("**Step 1**: Rendering Overlay...")
+                status_text.markdown("**Step 3**: Rendering Overlay...")
                 
                 # We use a distinct file name to ensure Streamlit doesn't cache an old version
                 output_filename = f"tracked_{uploaded_file.name}"
@@ -208,7 +208,7 @@ def main():
                 progress_bar.progress(75)
 
                 # Step D: Rendering Snapshot Gallery
-                status_text.markdown("**Step 2**: Finalizing Gallery...")
+                status_text.markdown("**Step 4**: Finalizing Gallery...")
                 
                 final_images = []
                 for idx, kf in enumerate(keyframes):
@@ -268,17 +268,41 @@ def main():
                 
                 with c1:
                     st.markdown("#### 📊 Key Metrics")
+                    # Updated to match new AI JSON keys
                     st.markdown(f"""
                     <div class="metric-card">
                         <b>Subject:</b> {txt_data.get('main_object', 'Object')}<br>
-                        <b>Principle:</b> {txt_data.get('physics_principle', 'Physics')}<br>
-                        <b>Motion:</b> {txt_data.get('velocity_estimation', 'Analyzed')}
+                        <b>Type:</b> {txt_data.get('motion_type', 'Unknown')}<br>
+                        <b>Principle:</b> {txt_data.get('physics_principle', 'Physics')}
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # NEW: Visual Cues section
+                    if txt_data.get('visual_cues'):
+                        st.markdown("##### 👁️ Visual Evidence")
+                        st.caption(txt_data['visual_cues'])
+                    
+                    # NEW: Active Forces tag list
+                    if txt_data.get('active_forces'):
+                        st.markdown("##### ⚡ Active Forces")
+                        st.write(", ".join([f"`{f}`" for f in txt_data['active_forces']]))
+
                 with c2:
                     st.markdown(f"#### 🎓 Expert Explanation ({analysis_level})")
-                    st.info(f"{txt_data.get('explanation', 'No explanation available.')}")
+                    
+                    # NEW: Governing Equation (Rendered as LaTeX)
+                    if txt_data.get('key_formula'):
+                        st.success("**Governing Equation:**")
+                        st.latex(txt_data['key_formula'])
+
+                    # Main Explanation
+                    st.info(txt_data.get('explanation', 'No explanation available.'))
+                    
+                    # NEW: Derived Equations Expander
+                    if txt_data.get('latex_equations'):
+                        with st.expander("🧮 Mathematical Derivation Details"):
+                            for eq in txt_data['latex_equations']:
+                                st.latex(eq)
             else:
                 error_details = txt_data.get("error") if txt_data else "Unknown Data Error"
                 st.error(f"⚠️ Analysis Text Failed: {error_details}")

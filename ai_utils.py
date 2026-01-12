@@ -6,8 +6,6 @@ import numpy as np
 import re
 import time
 
-import app
-
 # --- CONFIGURATION ---
 
 def configure_gemini(api_key):
@@ -27,12 +25,28 @@ safety_settings = [
 ]
 
 def _clean_json_response(text):
-    """Helper to strip markdown formatting from Gemini JSON responses."""
+    """
+    Sanitizes Gemini response to ensure valid JSON.
+    Specifically fixes LaTeX backslash issues (e.g., converts \theta to \\theta).
+    """
     text = text.strip()
-    # Remove ```json and ``` markers
+    
+    # 1. Strip Markdown code blocks
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\n", "", text)
         text = re.sub(r"\n```$", "", text)
+    
+    # 2. Fix Invalid Escapes (Critical for LaTeX)
+    # This regex finds backslashes that are NOT followed by valid JSON escape characters
+    # (Valid JSON escapes: " \ / b f n r t u)
+    # It replaces single \ with \\ so JSON.loads doesn't crash on \mu, \alpha, \sigma, etc.
+    try:
+        # Look for \ followed by anything that ISN'T a valid escape char
+        invalid_escape_pattern = r'(?<!\\)\\(?!["\\/bfnrtu])'
+        text = re.sub(invalid_escape_pattern, r'\\\\', text)
+    except Exception:
+        pass
+        
     return text
 
 # --- CORE FUNCTIONS ---
@@ -43,7 +57,7 @@ def get_batch_physics_overlays(frames_bgr_list):
     Uses the 'Universal Physics' prompt.
     """
     try:
-        model = genai.GenerativeModel('gemini-3-pro-preview')
+        model = genai.GenerativeModel('gemini-1.5-pro')
         
         # 1. Prepare Prompt parts
         prompt_text = """
@@ -291,7 +305,7 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
     Uses the 'Vision Engine' prompt.
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        model = genai.GenerativeModel('gemini-1.5-pro')
         
         if not keyframes:
             return {"error": "No frames to analyze"}
@@ -452,7 +466,7 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         - **Math**: Algebra, trig, basic calculus with variable definitions
         - **LaTeX**: Standard notation $F = ma$, $E_k = \frac{{1}}{{2}}mv^2$
         - **Focus**: Free Body Diagrams, net force, curriculum concepts
-        - **Example**: "Projectile motion with constant $a = -g = -9.8$ m/s². At peak, $v_y = 0$ giving $h_{{max}} = \frac{{v_0^2\sin^2(\theta)}}{{2g}}$."
+        - **Example**: "Projectile motion with constant $a = -g = -9.8$ m/s². At peak, $v_y = 0$ giving $h_{{max}} = \frac{{v_0^2\sin^2(\\theta)}}{{2g}}$."
 
         ### Expert (Graduate/Research)
         - **Style**: Rigorous, first-principles, advanced mechanics
@@ -559,7 +573,6 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
 
         response = model.generate_content(
             [prompt, pil_image],
-            # Removed generation_config to ensure compatibility with older google-generativeai versions
             safety_settings=safety_settings 
         )
         
