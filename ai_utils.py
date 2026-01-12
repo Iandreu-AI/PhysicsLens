@@ -1,5 +1,5 @@
 import google.generativeai as genai
-import PIL.Image
+from PIL import Image, PngImagePlugin
 import json
 import cv2
 import numpy as np

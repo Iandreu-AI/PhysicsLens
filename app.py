@@ -182,7 +182,7 @@ def main():
                 progress_bar.progress(50)
                 
                 # Step C: Motion Tracking & Rendering (Full Video)
-                status_text.markdown("**Step 3/4**: Rendering High-Performance Overlay...")
+                status_text.markdown("**Step 1**: Rendering Overlay...")
                 
                 # We use a distinct file name to ensure Streamlit doesn't cache an old version
                 output_filename = f"tracked_{uploaded_file.name}"
@@ -208,7 +208,7 @@ def main():
                 progress_bar.progress(75)
 
                 # Step D: Rendering Snapshot Gallery
-                status_text.markdown("**Step 4/4**: Finalizing Gallery...")
+                status_text.markdown("**Step 2**: Finalizing Gallery...")
                 
                 final_images = []
                 for idx, kf in enumerate(keyframes):
