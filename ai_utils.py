@@ -1,5 +1,5 @@
 import google.generativeai as genai
-from PIL import Image, PngImagePlugin
+from PIL import Image
 import json
 import cv2
 import numpy as np
@@ -24,101 +24,117 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
 
+# --- BULLETPROOF JSON PARSING ---
+
 def _clean_json_response(text):
     """
     Sanitizes Gemini response to ensure valid JSON.
-    Specifically fixes LaTeX backslash issues (e.g., converts \theta to \\theta).
+    Strips markdown code blocks.
     """
     text = text.strip()
     
-    # 1. Strip Markdown code blocks
+    # Strip Markdown code blocks (```json ... ```)
     if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\n", "", text)
-        text = re.sub(r"\n```$", "", text)
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
     
-    return text
+    return text.strip()
+
+def _fix_latex_escapes(text):
+    """
+    Fixes LaTeX backslash escaping for JSON compatibility.
+    
+    Strategy: Replace single backslashes with double backslashes,
+    but preserve already-escaped sequences.
+    """
+    # Step 1: Protect already-valid JSON escapes
+    # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX
+    
+    # Step 2: Replace all other single backslashes with double backslashes
+    # This regex matches a backslash NOT followed by another backslash or valid escape char
+    # Pattern explanation:
+    # (?<!\\)  - Not preceded by backslash (negative lookbehind)
+    # \\       - Match a single backslash
+    # (?![\\"\/bfnrtu]) - Not followed by valid JSON escape chars (negative lookahead)
+    
+    fixed = re.sub(r'(?<!\\)\\(?![\\"\/bfnrtu])', r'\\\\', text)
+    return fixed
 
 def _robust_json_load(text):
     """
-    Attempts to parse JSON with multiple fallback strategies for bad escapes.
+    Multi-strategy JSON parser with graceful fallback.
+    Tries 5 different approaches before giving up.
     """
-    # Strategy 1: Standard Load
+    original_text = text
+    
+    # STRATEGY 1: Direct parse (best case - AI gave us clean JSON)
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 2: Fix Latex Escapes (Smart Regex)
-    # Replaces \ followed by a char that isn't a valid escape with \\ + char
-    # e.g., \mu -> \\mu
+    except json.JSONDecodeError as e:
+        print(f"Strategy 1 failed: {e}")
+    
+    # STRATEGY 2: Fix LaTeX escapes with smart regex
     try:
-        # Match backslash NOT followed by " \ / b f n r t u
-        # We use a simple replacement loop to be safer than lookbehinds
-        fixed_text = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', text)
+        fixed_text = _fix_latex_escapes(text)
         return json.loads(fixed_text)
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 3: Nuclear Fallback (Double Escape Everything)
-    # This might break newlines (\n -> \\n), but it guarantees the JSON parses.
+    except json.JSONDecodeError as e:
+        print(f"Strategy 2 failed: {e}")
+    
+    # STRATEGY 3: Escape ALL backslashes (nuclear option)
     try:
-        # We manually escape backslashes, but try to preserve valid JSON structure quotes
-        # This is a 'best effort' to save the crash
-        safe_text = text.replace('\\', '\\\\')
-        # Revert valid escapes that we accidentally double-escaped
-        safe_text = safe_text.replace('\\\\"', '\\"').replace('\\\\n', '\\n')
-        return json.loads(safe_text)
-    except json.JSONDecodeError:
-        # Return partial error dict so UI shows something instead of crashing
-        return {
-            "error": "JSON Parsing Failed", 
-            "explanation": f"Raw Output: {text[:100]}...",
-            "main_object": "Error",
-            "physics_principle": "Parsing Error"
-        }
-
-# --- CONFIGURATION ---
-
-def configure_gemini(api_key):
-    """Configures the Gemini API."""
+        # Replace \ with \\ globally
+        escaped = text.replace('\\', '\\\\')
+        # Now fix over-escaped valid sequences
+        escaped = escaped.replace('\\\\n', '\\n')   # Newlines
+        escaped = escaped.replace('\\\\t', '\\t')   # Tabs
+        escaped = escaped.replace('\\\\r', '\\r')   # Carriage return
+        escaped = escaped.replace('\\\\"', '\\"')   # Quotes
+        escaped = escaped.replace('\\\\\\\\', '\\\\')  # Already escaped backslashes
+        return json.loads(escaped)
+    except json.JSONDecodeError as e:
+        print(f"Strategy 3 failed: {e}")
+    
+    # STRATEGY 4: Extract JSON from surrounding text
+    # Sometimes AI adds explanation before/after the JSON
     try:
-        genai.configure(api_key=api_key)
-        return True
+        # Find content between first { and last }
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1 and start < end:
+            json_candidate = text[start:end+1]
+            # Try parsing the extracted portion
+            return json.loads(_fix_latex_escapes(json_candidate))
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"Strategy 4 failed: {e}")
+    
+    # STRATEGY 5: Use ast.literal_eval as last resort
+    # (Works for Python-style dicts that are almost JSON)
+    try:
+        import ast
+        # Convert single quotes to double quotes
+        fixed = text.replace("'", '"')
+        # Try literal_eval
+        result = ast.literal_eval(fixed)
+        # If it's a dict, convert to JSON-compatible format
+        if isinstance(result, dict):
+            return result
     except Exception as e:
-        print(f"Configuration Error: {e}")
-        return False
-
-safety_settings = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-]
-
-def _clean_json_response(text):
-    """
-    Sanitizes Gemini response to ensure valid JSON.
-    Specifically fixes LaTeX backslash issues (e.g., converts \theta to \\theta).
-    """
-    text = text.strip()
+        print(f"Strategy 5 failed: {e}")
     
-    # 1. Strip Markdown code blocks
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\n", "", text)
-        text = re.sub(r"\n```$", "", text)
+    # ALL STRATEGIES FAILED - Return error object
+    print("="*60)
+    print("CRITICAL: All JSON parsing strategies failed")
+    print("Raw text (first 500 chars):")
+    print(original_text[:500])
+    print("="*60)
     
-    # 2. Fix Invalid Escapes (Critical for LaTeX)
-    # This regex finds backslashes that are NOT followed by valid JSON escape characters
-    # (Valid JSON escapes: " \ / b f n r t u)
-    # It replaces single \ with \\ so JSON.loads doesn't crash on \mu, \alpha, \sigma, etc.
-    try:
-        # Look for \ followed by anything that ISN'T a valid escape char
-        invalid_escape_pattern = r'(?<!\\)\\(?!["\\/bfnrtu])'
-        text = re.sub(invalid_escape_pattern, r'\\\\', text)
-    except Exception:
-        pass
-        
-    return text
+    return {
+        "error": "JSON Parsing Failed",
+        "explanation": "The AI returned malformed JSON. Please try again.",
+        "main_object": "Parse Error",
+        "physics_principle": "Unknown",
+        "raw_response": original_text[:200] + "..." if len(original_text) > 200 else original_text
+    }
 
 # --- CORE FUNCTIONS ---
 
