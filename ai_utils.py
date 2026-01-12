@@ -36,6 +36,77 @@ def _clean_json_response(text):
         text = re.sub(r"^```(?:json)?\n", "", text)
         text = re.sub(r"\n```$", "", text)
     
+    return text
+
+def _robust_json_load(text):
+    """
+    Attempts to parse JSON with multiple fallback strategies for bad escapes.
+    """
+    # Strategy 1: Standard Load
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Fix Latex Escapes (Smart Regex)
+    # Replaces \ followed by a char that isn't a valid escape with \\ + char
+    # e.g., \mu -> \\mu
+    try:
+        # Match backslash NOT followed by " \ / b f n r t u
+        # We use a simple replacement loop to be safer than lookbehinds
+        fixed_text = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', text)
+        return json.loads(fixed_text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: Nuclear Fallback (Double Escape Everything)
+    # This might break newlines (\n -> \\n), but it guarantees the JSON parses.
+    try:
+        # We manually escape backslashes, but try to preserve valid JSON structure quotes
+        # This is a 'best effort' to save the crash
+        safe_text = text.replace('\\', '\\\\')
+        # Revert valid escapes that we accidentally double-escaped
+        safe_text = safe_text.replace('\\\\"', '\\"').replace('\\\\n', '\\n')
+        return json.loads(safe_text)
+    except json.JSONDecodeError:
+        # Return partial error dict so UI shows something instead of crashing
+        return {
+            "error": "JSON Parsing Failed", 
+            "explanation": f"Raw Output: {text[:100]}...",
+            "main_object": "Error",
+            "physics_principle": "Parsing Error"
+        }
+
+# --- CONFIGURATION ---
+
+def configure_gemini(api_key):
+    """Configures the Gemini API."""
+    try:
+        genai.configure(api_key=api_key)
+        return True
+    except Exception as e:
+        print(f"Configuration Error: {e}")
+        return False
+
+safety_settings = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
+
+def _clean_json_response(text):
+    """
+    Sanitizes Gemini response to ensure valid JSON.
+    Specifically fixes LaTeX backslash issues (e.g., converts \theta to \\theta).
+    """
+    text = text.strip()
+    
+    # 1. Strip Markdown code blocks
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\n", "", text)
+        text = re.sub(r"\n```$", "", text)
+    
     # 2. Fix Invalid Escapes (Critical for LaTeX)
     # This regex finds backslashes that are NOT followed by valid JSON escape characters
     # (Valid JSON escapes: " \ / b f n r t u)
