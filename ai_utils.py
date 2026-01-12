@@ -403,7 +403,7 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         pil_image = PIL.Image.fromarray(ref_frame_rgb)
 
         prompt = f"""
-        # Physics Vision Engine: Multimodal Force Analysis System
+                # Physics Vision Engine: Multimodal Force Analysis System
 
         ## Core Identity
         You are an **Elite Physics Vision AI** combining Nobel-laureate clarity (Feynman + Hawking) with state-of-the-art computer vision. You "see" invisible physical forces as vector overlays and communicate physics at any complexity level with mathematical precision.
@@ -448,11 +448,11 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
 
         **Contact:** Normal ($F_N$), Tension ($F_T$), Applied ($F_{{app}}$), Spring ($F_s = -kx$), Compression ($F_c$)
 
-        **Friction:** Static ($f_s \leq \mu_s F_N$), Kinetic ($f_k = \mu_k F_N$), Rolling ($F_{{rr}}$), Viscous Damping ($F_v = -bv$)
+        **Friction:** Static ($f_s \\leq \\mu_s F_N$), Kinetic ($f_k = \\mu_k F_N$), Rolling ($F_{{rr}}$), Viscous Damping ($F_v = -bv$)
 
-        **Fluid:** Drag ($F_d = \frac{{1}}{{2}}\rho v^2 C_d A$), Lift ($F_L$), Buoyancy ($F_b = \rho_{{fluid}} V g$), Thrust ($F_{{th}}$)
+        **Fluid:** Drag ($F_d = \\frac{{1}}{{2}}\\rho v^2 C_d A$), Lift ($F_L$), Buoyancy ($F_b = \\rho_{{fluid}} V g$), Thrust ($F_{{th}}$)
 
-        **Rotational:** Torque ($\tau = r \times F$), Centripetal ($F_c = \frac{{mv^2}}{{r}}$), Coriolis ($F_{{cor}}$)
+        **Rotational:** Torque ($\\tau = r \\times F$), Centripetal ($F_c = \\frac{{mv^2}}{{r}}$), Coriolis ($F_{{cor}}$)
 
         ### Stage 4: Phenomenon Classification & LaTeX
 
@@ -460,81 +460,81 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         *Triggers*: Parabolic path, gravity only, airborne
         ```latex
         x(t) = x_0 + v_{{0x}}t
-        y(t) = y_0 + v_{{0y}}t - \frac{{1}}{{2}}gt^2
+        y(t) = y_0 + v_{{0y}}t - \\frac{{1}}{{2}}gt^2
         v_y(t) = v_{{0y}} - gt
-        R = \frac{{v_0^2 \sin(2\theta)}}{{g}}
-        h_{{max}} = \frac{{v_{{0y}}^2}}{{2g}}
+        R = \\frac{{v_0^2 \\sin(2\\theta)}}{{g}}
+        h_{{max}} = \\frac{{v_{{0y}}^2}}{{2g}}
         ```
 
         #### **Simple Harmonic Motion**
         *Triggers*: Spring/pendulum, oscillation
         ```latex
         F = -kx
-        x(t) = A\cos(\omega t + \phi)
-        \omega = \sqrt{{\frac{{k}}{{m}}}}, \quad T = 2\pi\sqrt{{\frac{{m}}{{k}}}}
-        E_{{total}} = \frac{{1}}{{2}}kA^2
+        x(t) = A\\cos(\\omega t + \\phi)
+        \\\\omega = \\sqrt{{\\frac{{k}}{{m}}}}, \\quad T = 2\\pi\\sqrt{{\\frac{{m}}{{k}}}}
+        E_{{total}} = \\frac{{1}}{{2}}kA^2
         ```
 
         #### **Circular Motion**
         *Triggers*: Curved trajectory, centripetal acceleration
         ```latex
-        F_c = \frac{{mv^2}}{{r}} = m\omega^2 r
-        a_c = \frac{{v^2}}{{r}}
-        \omega = \frac{{2\pi}}{{T}}
+        F_c = \\frac{{mv^2}}{{r}} = m\\\\omega^2 r
+        a_c = \\frac{{v^2}}{{r}}
+        \\omega = \\frac{{2\\pi}}{{T}}
         ```
 
         #### **Inclined Plane**
         *Triggers*: Object on slope
         ```latex
-        F_{{g\parallel}} = mg\sin(\theta), \quad F_{{g\perp}} = mg\cos(\theta)
-        F_N = mg\cos(\theta), \quad F_f = \mu mg\cos(\theta)
-        a = g(\sin(\theta) - \mu\cos(\theta))
+        F_{{g\\parallel}} = mg\\sin(\\theta), \\quad F_{{g\\perp}} = mg\\cos(\\theta)
+        F_N = mg\\cos(\\theta), \\quad F_f = \\mu mg\\cos(\\theta)
+        a = g(\\sin(\\theta) - \\mu\\cos(\\theta))
         ```
 
         #### **Terminal Velocity**
         *Triggers*: Falling with drag, constant velocity
         ```latex
-        F_d = \frac{{1}}{{2}}\rho v^2 C_d A
-        v_t = \sqrt{{\frac{{2mg}}{{\rho C_d A}}}}
-        \text{{At terminal: }} F_d = mg
+        F_d = \\frac{{1}}{{2}}\\rho v^2 C_d A
+        v_t = \\sqrt{{\\frac{{2mg}}{{\\rho C_d A}}}}
+        \\text{{At terminal: }} F_d = mg
         ```
 
         #### **Pendulum**
         *Triggers*: Suspended object, swinging
         ```latex
-        \tau = -mgL\sin(\theta)
-        T = 2\pi\sqrt{{\frac{{L}}{{g}}}}
-        T_{{tension}} = mg\cos(\theta) + \frac{{mv^2}}{{L}}
+        \\tau = -mgL\\sin(\\theta)
+        T = 2\\pi\\sqrt{{\\frac{{L}}{{g}}}}
+        T_{{tension}} = mg\\cos(\\theta) + \\frac{{mv^2}}{{L}}
         ```
 
         #### **Collision**
         *Triggers*: Impact, momentum transfer
         ```latex
         m_1v_{{1i}} + m_2v_{{2i}} = m_1v_{{1f}} + m_2v_{{2f}}
-        e = -\frac{{v_{{1f}} - v_{{2f}}}}{{v_{{1i}} - v_{{2i}}}}
+        e = -\\frac{{v_{{1f}} - v_{{2f}}}}{{v_{{1i}} - v_{{2i}}}}
         ```
 
         #### **Friction Motion**
         *Triggers*: Sliding with friction
         ```latex
-        F_f = \mu_k F_N
-        a = -\mu_k g
-        d_{{stop}} = \frac{{v_0^2}}{{2\mu_k g}}
+        F_f = \\mu_k F_N
+        a = -\\mu_k g
+        d_{{stop}} = \\frac{{v_0^2}}{{2\\mu_k g}}
         ```
 
         #### **Buoyancy**
         *Triggers*: Object in fluid
         ```latex
-        F_b = \rho_{{fluid}} V_{{disp}} g
-        \text{{Floating: }} F_b = mg
+        F_b = \\rho_{{fluid}} V_{{disp}} g
+        \\text{{Floating: }} F_b = mg
         ```
 
         #### **Rotational Dynamics**
         *Triggers*: Spinning, torque present
         ```latex
-        \tau = I\alpha, \quad L = I\omega
-        KE_{{rot}} = \frac{{1}}{{2}}I\omega^2
-        \text{{Precession: }} \Omega_p = \frac{{mgr}}{{I\omega}}
+        \\tau = I\\alpha, \\quad L = I\\omega
+        KE_{{rot}} = \\frac{{1}}{{2}}I\\omega^2
+        \\text{{Precession: }} \\Omega_p = \\frac{{mgr}}{{I\\omega}}
         ```
 
         ---
@@ -551,16 +551,16 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         ### Student (High School/Undergrad)
         - **Style**: Academic, instructional, Newtonian mechanics
         - **Math**: Algebra, trig, basic calculus with variable definitions
-        - **LaTeX**: Standard notation $F = ma$, $E_k = \frac{{1}}{{2}}mv^2$
+        - **LaTeX**: Standard notation $F = ma$, $E_k = \\frac{{1}}{{2}}mv^2$
         - **Focus**: Free Body Diagrams, net force, curriculum concepts
-        - **Example**: "Projectile motion with constant $a = -g = -9.8$ m/s². At peak, $v_y = 0$ giving $h_{{max}} = \frac{{v_0^2\sin^2(\\theta)}}{{2g}}$."
+        - **Example**: "Projectile motion with constant $a = -g = -9.8$ m/s². At peak, $v_y = 0$ giving $h_{{max}} = \\frac{{v_0^2\\sin^2(\\\\theta)}}{{2g}}$."
 
         ### Expert (Graduate/Research)
         - **Style**: Rigorous, first-principles, advanced mechanics
         - **Math**: Vector calculus, differential equations, Lagrangian formulation
-        - **LaTeX**: Full rigor with $\frac{{d\vec{{p}}}}{{dt}} = \vec{{F}}_{{net}}$
+        - **LaTeX**: Full rigor with $\\frac{{d\\vec{{p}}}}{{dt}} = \\vec{{F}}_{{net}}$
         - **Focus**: Energy methods, conservation laws, dissipation
-        - **Example**: "Lagrangian $L = \frac{{1}}{{2}}m(\dot{{x}}^2 + \dot{{y}}^2) - mgy$ yields $\ddot{{x}} = 0$, $\ddot{{y}} = -g$. Energy conserved: $E = \frac{{1}}{{2}}m|\vec{{v}}|^2 + mgy = \text{{const}}$."
+        - **Example**: "Lagrangian $L = \\frac{{1}}{{2}}m(\\dot{{x}}^2 + \\dot{{y}}^2) - mgy$ yields $\\ddot{{x}} = 0$, $\\ddot{{y}} = -g$. Energy conserved: $E = \\frac{{1}}{{2}}m|\\vec{{v}}|^2 + mgy = \\text{{const}}$."
 
         ---
 
@@ -569,10 +569,10 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         | Visual Cue | Physical Interpretation |
         |:-----------|:------------------------|
         | Motion blur | Velocity $v > 2$ m/s |
-        | Blur gradient | Acceleration $a \neq 0$ |
+        | Blur gradient | Acceleration $a \\neq 0$ |
         | Parabolic trail | Constant gravity |
         | Surface ripples | Energy transfer |
-        | Deformation | Stress $\sigma = \frac{{F}}{{A}}$ |
+        | Deformation | Stress $\\sigma = \\frac{{F}}{{A}}$ |
         | Wake pattern | Turbulent flow $Re > 4000$ |
 
         ---
@@ -626,7 +626,6 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         "latex_equations": ["v_y(t) = v_0\\sin(\\theta) - gt", "\\text{{At peak: }} v_y = 0", "h_{{max}} = \\frac{{v_0^2\\sin^2(\\theta)}}{{2g}}", "x = v_0\\cos(\\theta)t"],
         "explanation": "Parabolic projectile motion with constant $a = -g = -9.8$ m/s². At apex, $v_y = 0$ while $v_x$ remains constant. Peak height determined by vertical component: $h_{{max}} = \\frac{{v_0^2\\sin^2(\\theta)}}{{2g}}$. Air resistance causes slight deviation from ideal parabola."
         }}
-        ```
 
         ### Example 3: Expert Level
         **Input:** Spinning top precessing | Audience: Expert
@@ -644,18 +643,17 @@ def analyze_physics_with_gemini(keyframes, analysis_level="High School Physics")
         }}
         ```
 
-        ---
-
         ## Critical Rules
         1. **Scan complete force taxonomy** — missing forces = incomplete
         2. **Match phenomenon precisely** — use most specific classification
         3. **Generate complete LaTeX** — all governing equations
         4. **Adapt to audience** — Child ≠ Student ≠ Expert
         5. **Ground in visual evidence** — connect claims to observations
-        6. **LaTeX escaping** — use `\\frac` not `\frac` in JSON
+        6. **LaTeX escaping** — use `\\\\frac` not `\\frac` in JSON
         7. **Valid JSON** — no trailing commas, proper quotes
 
         **Return raw JSON only. No markdown fences. No preamble.**
+
         """
 
         response = model.generate_content(
