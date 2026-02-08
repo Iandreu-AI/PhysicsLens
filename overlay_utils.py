@@ -11,11 +11,11 @@ class VisualConfig:
     Colors are defined in BGR format for OpenCV.
     """
     # Semantic Colors
-    COLOR_GRAVITY: Tuple[int, int, int] = (0, 0, 255)       # Red
-    COLOR_VELOCITY: Tuple[int, int, int] = (255, 0, 0)      # Blue
-    COLOR_NORMAL: Tuple[int, int, int] = (0, 255, 0)        # Green
-    COLOR_FRICTION: Tuple[int, int, int] = (0, 165, 255)    # Orange
-    COLOR_PATH: Tuple[int, int, int] = (0, 255, 255)        # Yellow
+    COLOR_GRAVITY: Tuple[int, int, int] = (246, 130, 59)    # Bright Blue (BGR)
+    COLOR_VELOCITY: Tuple[int, int, int] = (21, 204, 250)   # Bright Yellow (BGR)
+    COLOR_NORMAL: Tuple[int, int, int] = (129, 185, 16)     # Emerald Green (BGR)
+    COLOR_FRICTION: Tuple[int, int, int] = (0, 165, 255)    # Orange (BGR)
+    COLOR_PATH: Tuple[int, int, int] = (255, 255, 255)      # White (BGR)
     COLOR_DEFAULT: Tuple[int, int, int] = (0, 255, 0)       # Fallback Green
     
     # Text Styling
@@ -82,6 +82,55 @@ class PhysicsOverlay:
                     text_c, 1, VisualConfig.AA_MODE)
 
     @staticmethod
+    def _draw_arrow(frame, start, end, color, label=None):
+        """
+        Internal helper to draw a 'Premium' style vector.
+        Features:
+        - Thick black outline for contrast
+        - Bright inner color
+        - Solid anchor dot
+        - Proportional arrowhead
+        """
+        # 1. Constants
+        THICKNESS_OUTLINE = 5
+        THICKNESS_INNER = 3
+        TIP_LENGTH = 0.25
+        
+        # 2. Draw Outline (Black)
+        cv2.arrowedLine(frame, start, end, (0,0,0), THICKNESS_OUTLINE, 
+                        VisualConfig.AA_MODE, tipLength=TIP_LENGTH)
+        
+        # 3. Draw Inner Line (Color)
+        cv2.arrowedLine(frame, start, end, color, THICKNESS_INNER, 
+                        VisualConfig.AA_MODE, tipLength=TIP_LENGTH)
+        
+        # 4. Draw Anchor Dot (Center of Mass)
+        # Outline
+        cv2.circle(frame, start, 6, (0,0,0), -1, VisualConfig.AA_MODE)
+        # Inner
+        cv2.circle(frame, start, 4, color, -1, VisualConfig.AA_MODE)
+
+        # 5. Label
+        if label:
+            # Position label at the END of the vector plus a small offset
+            # We can calculate a slight extension
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            mag = np.sqrt(dx*dx + dy*dy)
+            
+            if mag > 0:
+                # Offset by 15px in direction of vector
+                off_x = int(dx/mag * 20)
+                off_y = int(dy/mag * 20)
+            else:
+                off_x, off_y = 10, 10
+                
+            label_pos = (end[0] + off_x, end[1] + off_y)
+            PhysicsOverlay.draw_smart_label(frame, label, label_pos, color)
+            
+        return frame
+
+    @staticmethod
     def draw_vector(frame, start_point, vector, label=None, color=(0,255,0), scale=1.0):
         """
         Draws a physics vector (arrow). Used by the CV Tracker in app.py.
@@ -97,21 +146,7 @@ class PhysicsOverlay:
         magnitude = np.sqrt(dx**2 + dy**2)
         if magnitude < 5.0: return frame
 
-        # Dynamic Tip Length
-        tip_len = 0.3 if magnitude < 50 else 0.15
-
-        # Arrow
-        cv2.arrowedLine(frame, p1, p2, color, VisualConfig.LINE_THICKNESS + 1, 
-                        VisualConfig.AA_MODE, tipLength=tip_len)
-        
-        # Anchor Dot
-        cv2.circle(frame, p1, 4, color, -1, VisualConfig.AA_MODE)
-
-        # Label
-        if label:
-            PhysicsOverlay.draw_smart_label(frame, label, (p2[0]+10, p2[1]), color)
-            
-        return frame
+        return PhysicsOverlay._draw_arrow(frame, p1, p2, color, label)
     
     @staticmethod
     def draw_hud(frame, data: dict):
@@ -144,10 +179,9 @@ class PhysicsOverlay:
         # Draw Center of Mass
         if "object_center" in ai_data:
             center = to_pix(ai_data["object_center"])
-            # Outer Glow
-            cv2.circle(frame, center, 8, (0,0,0), 2, VisualConfig.AA_MODE)
-            # Inner Dot
-            cv2.circle(frame, center, 6, (255,255,255), -1, VisualConfig.AA_MODE)
+            # Outer Glow/Ring
+            cv2.circle(frame, center, 10, (0,0,0), 2, VisualConfig.AA_MODE)
+            cv2.circle(frame, center, 8, (255,255,255), 1, VisualConfig.AA_MODE)
             
         # Draw Vectors from JSON
         if "vectors" in ai_data:
@@ -162,17 +196,17 @@ class PhysicsOverlay:
                 else:
                     # Fallback for old "name" based colors
                     c_map = {
-                        "red": VisualConfig.COLOR_GRAVITY,
-                        "green": VisualConfig.COLOR_VELOCITY,
-                        "blue": VisualConfig.COLOR_NORMAL,
-                        "orange": VisualConfig.COLOR_FRICTION
+                        "blue": VisualConfig.COLOR_GRAVITY,      # Blue
+                        "yellow": VisualConfig.COLOR_VELOCITY,   # Yellow
+                        "green": VisualConfig.COLOR_NORMAL,      # Green
+                        "orange": VisualConfig.COLOR_FRICTION,   # Orange
+                        "pink": (153, 72, 236),                  # Pink
+                        "purple": (153, 72, 236),                # Purple/Magenta
+                        "red": (0, 0, 255)                       # Red Fallback
                     }
                     color = c_map.get(color_raw, VisualConfig.COLOR_VELOCITY)
                 
-                # Draw the vector
-                # Note: We use arrowedLine directly here because we have absolute start/end points
-                # rather than start + velocity_delta
-                cv2.arrowedLine(frame, start, end, color, 4, VisualConfig.AA_MODE, tipLength=0.2)
-                PhysicsOverlay.draw_smart_label(frame, vec.get("name", ""), end, color)
+                # Draw using the new shared robust renderer
+                PhysicsOverlay._draw_arrow(frame, start, end, color, vec.get("name", ""))
                 
         return frame
