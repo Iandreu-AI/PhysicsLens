@@ -9,13 +9,14 @@ import base64
 # --- LOCAL MODULE IMPORTS ---
 from overlay_utils import PhysicsOverlay
 from frame_optimizer import optimize_frames
-import ai_utils
-from ai_utils import (
+import ai_test
+from ai_test import (
     get_physics_vectors,
     draw_vectors_with_debug,
     CoordinateTransformer
 )
 from track_utils import MotionTracker
+from video_utils import WebcamRecorder
 
 # --- CONFIGURATION & CSS ---
 st.set_page_config(
@@ -456,11 +457,11 @@ def render_physics_tutor(chat_history, vector_data, analysis_text):
             
             try:
                 # Retrieve streaming response from AI utility
-                stream = ai_utils.get_chat_response_stream(
+                stream = ai_test.get_chat_response_stream(
                     chat_history, 
-                    prompt, 
-                    vector_data,
-                    analysis_text
+                    analysis_text, # Corrected: passed analysis_text as context
+                    st.secrets.get("GOOGLE_API_KEY", os.environ.get("GOOGLE_API_KEY")),
+                    prompt
                 )
                 
                 for chunk in stream:
@@ -497,7 +498,7 @@ def main():
     except Exception:
         api_key = os.environ.get("GOOGLE_API_KEY")
     if api_key:
-        ai_utils.configure_gemini(api_key)
+        ai_test.configure_gemini(api_key)
 
     # 4. Source Selection (Layout: Upload | OR | Webcam)
     st.markdown("<br>", unsafe_allow_html=True)
@@ -587,29 +588,76 @@ def main():
                             st.error("Extraction failed.")
                             st.stop()
                         
-                        # Stage 2: AI Analysis
-                        status_text.markdown("*Querying Gemini Vision...*")
-                        text_data = ai_utils.analyze_physics_with_gemini(keyframes,difficulty=difficulty)
-                        progress_bar.progress(40)
+                        # Stage 2 & 3: Parallel AI Analysis & Local Tracking
+                        status_text.markdown("*Optimizing tracking engine...*")
                         
-                        # Stage 3: Vector Generation (NEW HYBRID SYSTEM)
-                        status_text.markdown("*Generating physics vectors with hybrid system...*")
-                        vector_data_raw = []
+                        # 2a. Run Local Tracking First (Sequential for continuity)
+                        # We need to know where the object is for every frame to help the AI
+                        centroids = []
+                        prev_centroid = None
                         bgr_frames = [kf['frame_bgr'] for kf in keyframes]
                         
-                        prev_frame = None
-                        for idx, frame_bgr in enumerate(bgr_frames):
-                            # Use the new hybrid system
-                            vector_data = get_physics_vectors(frame_bgr, prev_frame, idx)
-                            vector_data_raw.append(vector_data)
-                            prev_frame = frame_bgr
-                            
-                            # Update progress incrementally
-                            progress = 40 + int((idx / len(bgr_frames)) * 20)  # 40-60%
-                            progress_bar.progress(progress)
+                        for frame in bgr_frames:
+                            # Use the local detection logic directly
+                            c = ai_test.detect_object_centroid(frame, prev_centroid=prev_centroid)
+                            centroids.append(c)
+                            if c:
+                                prev_centroid = c
                         
+                        progress_bar.progress(40)
+                        
+                        # 2b. Fire Parallel API Requests
+                        status_text.markdown("⚡ *Parallelizing AI Physics cores...*")
+                        
+                        import concurrent.futures
+                        
+                        vector_data_raw = [None] * len(bgr_frames)
+                        text_data = None
+                        
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                            # Submit Text Analysis
+                            future_text = executor.submit(
+                                ai_test.analyze_physics_with_gemini, 
+                                bgr_frames, 
+                                api_key, 
+                                difficulty
+                            )
+                            
+                            # Submit Vector Analysis for each frame (using pre-calculated centroids)
+                            future_vectors = {}
+                            for idx, (frame, centroid) in enumerate(zip(bgr_frames, centroids)):
+                                f = executor.submit(
+                                    ai_test.get_physics_vectors,
+                                    frame,
+                                    api_key,
+                                    None,        # prev_centroid not needed since we have known_centroid
+                                    centroid     # known_centroid
+                                )
+                                future_vectors[f] = idx
+                            
+                            # Wait for results
+                            completed_count = 0
+                            for future in concurrent.futures.as_completed(future_vectors):
+                                idx = future_vectors[future]
+                                try:
+                                    vector_data_raw[idx] = future.result()
+                                except Exception as e:
+                                    print(f"Vector task {idx} failed: {e}")
+                                
+                                completed_count += 1
+                                # Update progress bar from 40% to 80%
+                                progress = 40 + int((completed_count / len(bgr_frames)) * 40)
+                                progress_bar.progress(progress)
+                            
+                            # Get Text Result
+                            try:
+                                text_data = future_text.result() or {}
+                            except Exception as e:
+                                print(f"Text task failed: {e}")
+                                text_data = {}
+
                         st.session_state.vector_data = vector_data_raw
-                        progress_bar.progress(60)
+                        progress_bar.progress(90)
                         
                         # Stage 4: Create snapshot images with fixed vectors
                         status_text.markdown("*Finalizing visualization with fixed vectors...*")
@@ -722,8 +770,11 @@ def main():
                     st.markdown("</div>", unsafe_allow_html=True)
                 with c_eqn:
                     st.markdown("""<div class="feature-card"><h3>🧮 Governing Equation</h3>""", unsafe_allow_html=True)
-                    if txt_data.get('key_formula'):
-                        st.latex(txt_data['key_formula'])
+                    kf = txt_data.get('key_formula')
+                    if kf:
+                        # Clean potential dollar signs for st.latex
+                        kf_clean = kf.replace('$', '').strip()
+                        st.latex(kf_clean)
                     else:
                         st.caption("No equation detected.")
                     st.markdown("</div>", unsafe_allow_html=True)
